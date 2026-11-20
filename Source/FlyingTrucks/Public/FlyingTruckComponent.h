@@ -27,7 +27,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam( FOnFlightModeChanged, bool, bIsFlyi
  * Controls while driving:
  *   F / Gamepad Y            toggle flight mode
  *   Space / Gamepad A        pitch nose up   (flight mode only)
- *   Left Ctrl / Gamepad B    pitch nose down (flight mode only)
+ *   C, Left Ctrl / Gamepad B pitch nose down (flight mode only)
  *   W / Right trigger        thrust;  S / Left trigger: air brake / reverse thrust
  *   A, D / Left stick        bank and turn
  *   (read by this component in flight mode, and still passed on to the truck)

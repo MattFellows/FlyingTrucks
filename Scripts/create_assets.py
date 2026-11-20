@@ -96,7 +96,7 @@ desc.set_editor_property("m_vehicle_class", bp_truck.generated_class())
 desc.set_editor_property("m_display_name", unreal.Text("Flying Truck"))
 desc.set_editor_property("m_description", unreal.Text(
     "A truck that can fly. Press F (Y on gamepad) while driving to toggle flight mode; "
-    "Space/A pitches up, Ctrl/B pitches down."))
+    "Space/A pitches up, C or Ctrl/B pitches down."))
 save(bp_desc)
 
 # --- 3. Recipe (same cost as the truck) ----------------------------------

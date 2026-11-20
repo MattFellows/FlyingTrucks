@@ -110,6 +110,7 @@ void UFlyingTruckComponent::CreateInputObjects()
 	FlightContext->MapKey( PitchUpAction, EKeys::SpaceBar );
 	FlightContext->MapKey( PitchUpAction, EKeys::Gamepad_FaceButton_Bottom );   // A
 	FlightContext->MapKey( PitchDownAction, EKeys::LeftControl );
+	FlightContext->MapKey( PitchDownAction, EKeys::C );                         // matches the game's "down" habit
 	FlightContext->MapKey( PitchDownAction, EKeys::Gamepad_FaceButton_Right );  // B
 }
 
