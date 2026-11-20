@@ -14,6 +14,8 @@
 #include "InputAction.h"
 #include "InputActionValue.h"
 #include "InputMappingContext.h"
+#include "TimerManager.h"
+#include "UObject/UnrealType.h"
 
 UFlyingTruckComponent::UFlyingTruckComponent()
 {
@@ -45,11 +47,21 @@ void UFlyingTruckComponent::BeginPlay()
 	{
 		UE_LOG( LogFlyingTrucks, Warning, TEXT( "UFlyingTruckComponent must be added to a pawn (vehicle); owner is %s." ), *GetOwner()->GetName() );
 	}
+
+	if( bApplyDefaultPaint && GetOwner()->HasAuthority() )
+	{
+		// A freshly built vehicle gets its customization from the build gun after BeginPlay, so wait a moment.
+		GetWorld()->GetTimerManager().SetTimer( PaintTimer, this, &UFlyingTruckComponent::ApplyDefaultPaint, 1.0f, false );
+	}
 }
 
 void UFlyingTruckComponent::EndPlay( const EEndPlayReason::Type EndPlayReason )
 {
 	UnbindFromController();
+	if( UWorld* World = GetWorld() )
+	{
+		World->GetTimerManager().ClearTimer( PaintTimer );
+	}
 	if( APawn* Pawn = Cast< APawn >( GetOwner() ) )
 	{
 		Pawn->ReceiveControllerChangedDelegate.RemoveDynamic( this, &UFlyingTruckComponent::HandleControllerChanged );
@@ -358,4 +370,122 @@ void UFlyingTruckComponent::ApplyFlightForces( UPrimitiveComponent* Body, float 
 		const float PitchError = FVector::DotProduct( DesiredAngVel - AngVel, Right );
 		Body->AddTorqueInRadians( Right * PitchError * AngularResponse, NAME_None, true );
 	}
+}
+
+namespace
+{
+	/** Calls a reflected function on Target with a properly initialised parameter buffer. */
+	struct FReflectedCall
+	{
+		UFunction* Function = nullptr;
+		uint8* Params = nullptr;
+
+		FReflectedCall( UObject* Target, FName Name )
+		{
+			Function = Target ? Target->FindFunction( Name ) : nullptr;
+			if( Function )
+			{
+				Params = static_cast< uint8* >( FMemory::Malloc( FMath::Max< int32 >( Function->ParmsSize, 1 ), Function->GetMinAlignment() ) );
+				FMemory::Memzero( Params, Function->ParmsSize );
+				for( TFieldIterator< FProperty > It( Function ); It && It->HasAnyPropertyFlags( CPF_Parm ); ++It )
+				{
+					It->InitializeValue_InContainer( Params );
+				}
+			}
+		}
+		~FReflectedCall()
+		{
+			if( Params )
+			{
+				for( TFieldIterator< FProperty > It( Function ); It && It->HasAnyPropertyFlags( CPF_Parm ); ++It )
+				{
+					It->DestroyValue_InContainer( Params );
+				}
+				FMemory::Free( Params );
+			}
+		}
+		FStructProperty* FirstStructParam() const
+		{
+			for( TFieldIterator< FProperty > It( Function ); It && It->HasAnyPropertyFlags( CPF_Parm ); ++It )
+			{
+				if( FStructProperty* Prop = CastField< FStructProperty >( *It ) )
+				{
+					return Prop;
+				}
+			}
+			return nullptr;
+		}
+	};
+
+	void SetLinearColorField( const UScriptStruct* Struct, void* StructData, FName Field, const FLinearColor& Color )
+	{
+		if( FStructProperty* Prop = CastField< FStructProperty >( Struct->FindPropertyByName( Field ) ) )
+		{
+			if( Prop->Struct == TBaseStructure< FLinearColor >::Get() )
+			{
+				*Prop->ContainerPtrToValuePtr< FLinearColor >( StructData ) = Color;
+			}
+		}
+	}
+}
+
+void UFlyingTruckComponent::ApplyDefaultPaint()
+{
+	AActor* Owner = GetOwner();
+	if( !Owner )
+	{
+		return;
+	}
+
+	FReflectedCall Get( Owner, TEXT( "GetCustomizationData" ) );
+	FStructProperty* DataProp = Get.Function ? Get.FirstStructParam() : nullptr;
+	if( !DataProp )
+	{
+		UE_LOG( LogFlyingTrucks, Warning, TEXT( "%s: GetCustomizationData not found; can't paint." ), *Owner->GetName() );
+		return;
+	}
+	Owner->ProcessEvent( Get.Function, Get.Params );
+
+	const UScriptStruct* DataStruct = DataProp->Struct;
+	void* Data = DataProp->ContainerPtrToValuePtr< void >( Get.Params );
+	FClassProperty* SwatchProp = CastField< FClassProperty >( DataStruct->FindPropertyByName( TEXT( "SwatchDesc" ) ) );
+	FStructProperty* ColorProp = CastField< FStructProperty >( DataStruct->FindPropertyByName( TEXT( "OverrideColorData" ) ) );
+	if( !SwatchProp || !ColorProp )
+	{
+		UE_LOG( LogFlyingTrucks, Warning, TEXT( "%s: customization data has no SwatchDesc/OverrideColorData; can't paint." ), *Owner->GetName() );
+		return;
+	}
+
+	UClass* CurrentSwatch = Cast< UClass >( SwatchProp->GetObjectPropertyValue_InContainer( Data ) );
+	const FString CurrentName = CurrentSwatch ? CurrentSwatch->GetName() : TEXT( "none" );
+	UE_LOG( LogFlyingTrucks, Log, TEXT( "%s: current swatch %s." ), *Owner->GetName(), *CurrentName );
+
+	// Only repaint trucks still wearing the default paint; anything the player painted is kept.
+	const bool bIsDefaultPaint = !CurrentSwatch || CurrentName == TEXT( "SwatchDesc_Slot0_C" );
+	if( !bIsDefaultPaint )
+	{
+		return;
+	}
+
+	UClass* CustomSwatch = LoadClass< UObject >( nullptr, TEXT( "/Game/FactoryGame/Buildable/-Shared/Customization/Swatches/SwatchDesc_Custom.SwatchDesc_Custom_C" ) );
+	if( !CustomSwatch )
+	{
+		UE_LOG( LogFlyingTrucks, Warning, TEXT( "SwatchDesc_Custom not found; can't paint." ) );
+		return;
+	}
+	SwatchProp->SetObjectPropertyValue_InContainer( Data, CustomSwatch );
+	void* ColorData = ColorProp->ContainerPtrToValuePtr< void >( Data );
+	SetLinearColorField( ColorProp->Struct, ColorData, TEXT( "PrimaryColor" ), DefaultPaintPrimary );
+	SetLinearColorField( ColorProp->Struct, ColorData, TEXT( "SecondaryColor" ), DefaultPaintSecondary );
+
+	FReflectedCall Set( Owner, TEXT( "SetCustomizationData" ) );
+	FStructProperty* SetParam = Set.Function ? Set.FirstStructParam() : nullptr;
+	if( !SetParam || SetParam->Struct != DataStruct )
+	{
+		UE_LOG( LogFlyingTrucks, Warning, TEXT( "%s: SetCustomizationData not found; can't paint." ), *Owner->GetName() );
+		return;
+	}
+	DataStruct->CopyScriptStruct( SetParam->ContainerPtrToValuePtr< void >( Set.Params ), Data );
+	Owner->ProcessEvent( Set.Function, Set.Params );
+	UE_LOG( LogFlyingTrucks, Log, TEXT( "%s: applied Flying Truck paint." ), *Owner->GetName() );
 }

@@ -103,6 +103,16 @@ public:
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Tuning" )
 	float GroundCheckDistance = 300.f;
 
+	/** Paint new Flying Trucks in their own colours (only while they still have the default paint). */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Paint" )
+	bool bApplyDefaultPaint = true;
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Paint" )
+	FLinearColor DefaultPaintPrimary = FLinearColor( 0.02f, 0.30f, 0.95f );   // bright sky blue
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Paint" )
+	FLinearColor DefaultPaintSecondary = FLinearColor( 0.90f, 0.90f, 0.90f ); // white trim
+
 	/** Minimum time between flight toggles, seconds. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Input" )
 	float ToggleCooldownSeconds = 0.5f;
@@ -141,6 +151,9 @@ protected:
 	void Input_PitchDownReleased( const FInputActionValue& Value ) { bPitchDownHeld = false; }
 
 	bool IsAirborne( const UPrimitiveComponent* Body ) const;
+
+	/** Sets the custom paint via reflection (avoids depending on FFactoryCustomizationData's C++ layout). */
+	void ApplyDefaultPaint();
 	void ApplyFlightForces( UPrimitiveComponent* Body, float DeltaTime );
 
 private:
@@ -150,6 +163,7 @@ private:
 	double LastToggleTime = -1000.0;
 	bool bToggleKeyHeld = false;
 	float DebugLogTimer = 0.f;
+	FTimerHandle PaintTimer;
 
 	float ThrottleInput = 0.f;
 	float BrakeInput = 0.f;
