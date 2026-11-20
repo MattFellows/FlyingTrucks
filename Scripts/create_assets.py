@@ -104,7 +104,9 @@ bp_recipe = make_blueprint("Recipe_FlyingTruck", Recipe_Truck)
 compile_bp(bp_recipe)
 recipe = cdo_of(bp_recipe)
 recipe.set_editor_property("m_product", [unreal.ItemAmount(item_class=bp_desc.generated_class(), amount=1)])
-# Recipe name comes from the product's name ("Flying Truck").
+# Recipe_Truck already has mDisplayNameOverride = true ("Truck"); that flag isn't editable but is inherited,
+# so setting mDisplayName is enough.
+recipe.set_editor_property("m_display_name", unreal.Text("Flying Truck"))
 save(bp_recipe)
 
 # --- 4. Schematic (granted automatically by AFlyingTrucksSubsystem) ------

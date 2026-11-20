@@ -112,6 +112,7 @@ void UFlyingTruckComponent::BindToController( APlayerController* PlayerControlle
 	{
 		FlightInputComponent = NewObject< UEnhancedInputComponent >( this, TEXT( "FlyingTruckInput" ) );
 		FlightInputComponent->BindAction( ToggleAction, ETriggerEvent::Started, this, &UFlyingTruckComponent::Input_ToggleFlight );
+		FlightInputComponent->BindAction( ToggleAction, ETriggerEvent::Completed, this, &UFlyingTruckComponent::Input_ToggleReleased );
 		FlightInputComponent->BindAction( PitchUpAction, ETriggerEvent::Started, this, &UFlyingTruckComponent::Input_PitchUpPressed );
 		FlightInputComponent->BindAction( PitchUpAction, ETriggerEvent::Completed, this, &UFlyingTruckComponent::Input_PitchUpReleased );
 		FlightInputComponent->BindAction( PitchDownAction, ETriggerEvent::Started, this, &UFlyingTruckComponent::Input_PitchDownPressed );
@@ -143,7 +144,7 @@ void UFlyingTruckComponent::UnbindFromController()
 		BoundController->PopInputComponent( FlightInputComponent );
 	}
 	BoundController = nullptr;
-	bPitchUpHeld = bPitchDownHeld = false;
+	bPitchUpHeld = bPitchDownHeld = bToggleKeyHeld = false;
 }
 
 void UFlyingTruckComponent::UpdateFlightContext()
@@ -171,14 +172,23 @@ void UFlyingTruckComponent::UpdateFlightContext()
 
 void UFlyingTruckComponent::Input_ToggleFlight( const FInputActionValue& Value )
 {
-	// In-game, one key press fires Started twice in the same frame (seen in 0.1.0: ON then OFF instantly).
-	if( LastToggleFrame == GFrameCounter )
+	// One key press can arrive several times: twice in the same frame, and again when toggling flight
+	// adds/removes the flight mapping context (Enhanced Input rebuilds and re-sees the held key).
+	// So require the key to be released and some time to pass between toggles.
+	const double Now = GetWorld()->GetRealTimeSeconds();
+	if( bToggleKeyHeld || Now - LastToggleTime < ToggleCooldownSeconds )
 	{
-		UE_LOG( LogFlyingTrucks, Log, TEXT( "Ignoring duplicate toggle in frame %llu." ), GFrameCounter );
+		UE_LOG( LogFlyingTrucks, Log, TEXT( "Ignoring repeated toggle (held=%d, %.2fs since last)." ), bToggleKeyHeld ? 1 : 0, Now - LastToggleTime );
 		return;
 	}
-	LastToggleFrame = GFrameCounter;
+	bToggleKeyHeld = true;
+	LastToggleTime = Now;
 	ToggleFlying();
+}
+
+void UFlyingTruckComponent::Input_ToggleReleased( const FInputActionValue& Value )
+{
+	bToggleKeyHeld = false;
 }
 
 void UFlyingTruckComponent::SetFlying( bool bNewFlying )

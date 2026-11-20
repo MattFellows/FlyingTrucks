@@ -101,6 +101,10 @@ public:
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Tuning" )
 	float GroundCheckDistance = 300.f;
 
+	/** Minimum time between flight toggles, seconds. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Input" )
+	float ToggleCooldownSeconds = 0.5f;
+
 	/** Priority of the mod's input mapping contexts (above the vehicle's own). */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Input" )
 	int32 InputPriority = 1000;
@@ -115,6 +119,7 @@ protected:
 	void CreateInputObjects();
 
 	void Input_ToggleFlight( const FInputActionValue& Value );
+	void Input_ToggleReleased( const FInputActionValue& Value );
 	void Input_PitchUpPressed( const FInputActionValue& Value ) { bPitchUpHeld = true; }
 	void Input_PitchUpReleased( const FInputActionValue& Value ) { bPitchUpHeld = false; }
 	void Input_PitchDownPressed( const FInputActionValue& Value ) { bPitchDownHeld = true; }
@@ -127,7 +132,8 @@ private:
 	UPROPERTY( Transient )
 	bool bIsFlying = false;
 
-	uint64 LastToggleFrame = 0;
+	double LastToggleTime = -1000.0;
+	bool bToggleKeyHeld = false;
 	float DebugLogTimer = 0.f;
 
 	bool bPitchUpHeld = false;
