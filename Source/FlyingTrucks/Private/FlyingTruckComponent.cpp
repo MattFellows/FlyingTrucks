@@ -5,6 +5,8 @@
 #include "FlyingTrucks.h"
 #include "ChaosVehicleMovementComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/PointLightComponent.h"
+#include "Components/SpotLightComponent.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "EnhancedInputComponent.h"
@@ -47,6 +49,8 @@ void UFlyingTruckComponent::BeginPlay()
 	{
 		UE_LOG( LogFlyingTrucks, Warning, TEXT( "UFlyingTruckComponent must be added to a pawn (vehicle); owner is %s." ), *GetOwner()->GetName() );
 	}
+
+	CreateGlowLights();
 
 	if( bApplyDefaultPaint && GetOwner()->HasAuthority() )
 	{
@@ -256,6 +260,7 @@ void UFlyingTruckComponent::SetFlying( bool bNewFlying )
 	}
 	bIsFlying = bNewFlying;
 	UpdateFlightContext();
+	UpdateGlow();
 	UE_LOG( LogFlyingTrucks, Log, TEXT( "%s: flight mode %s." ), *GetOwner()->GetName(), bIsFlying ? TEXT( "ON" ) : TEXT( "OFF" ) );
 	OnFlightModeChanged.Broadcast( bIsFlying );
 }
@@ -488,4 +493,55 @@ void UFlyingTruckComponent::ApplyDefaultPaint()
 	DataStruct->CopyScriptStruct( SetParam->ContainerPtrToValuePtr< void >( Set.Params ), Data );
 	Owner->ProcessEvent( Set.Function, Set.Params );
 	UE_LOG( LogFlyingTrucks, Log, TEXT( "%s: applied Flying Truck paint." ), *Owner->GetName() );
+}
+
+void UFlyingTruckComponent::CreateGlowLights()
+{
+	if( !bFlightGlow || GetNetMode() == NM_DedicatedServer || GlowLight )
+	{
+		return;
+	}
+	USceneComponent* Root = GetOwner()->GetRootComponent();
+	if( !Root )
+	{
+		return;
+	}
+
+	GlowLight = NewObject< UPointLightComponent >( GetOwner(), TEXT( "FlyingTruckGlow" ) );
+	GlowLight->SetupAttachment( Root );
+	GlowLight->SetRelativeLocation( GlowOffset - FVector( 0.f, 0.f, 40.f ) );
+	GlowLight->SetIntensityUnits( ELightUnits::Unitless );
+	GlowLight->SetIntensity( GlowIntensity );
+	GlowLight->SetAttenuationRadius( GlowRadius );
+	GlowLight->SetLightColor( GlowColor );
+	GlowLight->SetCastShadows( false );
+	GlowLight->SetVisibility( false );
+	GlowLight->RegisterComponent();
+
+	GroundGlowLight = NewObject< USpotLightComponent >( GetOwner(), TEXT( "FlyingTruckGroundGlow" ) );
+	GroundGlowLight->SetupAttachment( Root );
+	GroundGlowLight->SetRelativeLocation( GlowOffset );
+	GroundGlowLight->SetRelativeRotation( FRotator( -90.f, 0.f, 0.f ) ); // straight down
+	GroundGlowLight->SetIntensityUnits( ELightUnits::Unitless );
+	GroundGlowLight->SetIntensity( GroundGlowIntensity );
+	GroundGlowLight->SetAttenuationRadius( GroundGlowRange );
+	GroundGlowLight->SetInnerConeAngle( 15.f );
+	GroundGlowLight->SetOuterConeAngle( 40.f );
+	GroundGlowLight->SetLightColor( GlowColor );
+	GroundGlowLight->SetCastShadows( false );
+	GroundGlowLight->SetVisibility( false );
+	GroundGlowLight->RegisterComponent();
+}
+
+void UFlyingTruckComponent::UpdateGlow()
+{
+	const bool bOn = bFlightGlow && bIsFlying;
+	if( GlowLight )
+	{
+		GlowLight->SetVisibility( bOn );
+	}
+	if( GroundGlowLight )
+	{
+		GroundGlowLight->SetVisibility( bOn );
+	}
 }

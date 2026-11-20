@@ -86,6 +86,12 @@ if not has_component:
     sds.rename_subobject(new_handle, unreal.Text("FlyingTruck"))
     log("Added FlyingTruckComponent to BP_FlyingTruck")
 compile_bp(bp_truck)
+# Vehicle descriptors take their name/description from the vehicle class, not the descriptor.
+truck_cdo = cdo_of(bp_truck)
+truck_cdo.set_editor_property("m_display_name", unreal.Text("Flying Truck"))
+truck_cdo.set_editor_property("m_description", unreal.Text(
+    "A truck that can fly. Press F (Y on gamepad) while driving to toggle flight mode; "
+    "Space/A pitches up, C or Ctrl/B pitches down."))
 save(bp_truck)
 
 # --- 2. Descriptor -------------------------------------------------------

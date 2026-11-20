@@ -10,6 +10,8 @@ class APawn;
 class AController;
 class APlayerController;
 class UPrimitiveComponent;
+class UPointLightComponent;
+class USpotLightComponent;
 class UChaosVehicleMovementComponent;
 class UEnhancedInputComponent;
 class UInputAction;
@@ -113,6 +115,31 @@ public:
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Paint" )
 	FLinearColor DefaultPaintSecondary = FLinearColor( 0.90f, 0.90f, 0.90f ); // white trim
 
+	/** Glow underneath the truck while flight mode is on. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Glow" )
+	bool bFlightGlow = true;
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Glow" )
+	FLinearColor GlowColor = FLinearColor( 0.1f, 0.45f, 1.0f );
+
+	/** Offset of the glow lights from the truck's origin, cm (truck-local). */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Glow" )
+	FVector GlowOffset = FVector( 0.f, 0.f, 20.f );
+
+	/** Underside glow (point light), unitless intensity. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Glow" )
+	float GlowIntensity = 30000.f;
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Glow" )
+	float GlowRadius = 900.f;
+
+	/** Downward pool of light on the ground (spot light), unitless intensity. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Glow" )
+	float GroundGlowIntensity = 80000.f;
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Glow" )
+	float GroundGlowRange = 4000.f;
+
 	/** Minimum time between flight toggles, seconds. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Input" )
 	float ToggleCooldownSeconds = 0.5f;
@@ -152,6 +179,9 @@ protected:
 
 	bool IsAirborne( const UPrimitiveComponent* Body ) const;
 
+	void CreateGlowLights();
+	void UpdateGlow();
+
 	/** Sets the custom paint via reflection (avoids depending on FFactoryCustomizationData's C++ layout). */
 	void ApplyDefaultPaint();
 	void ApplyFlightForces( UPrimitiveComponent* Body, float DeltaTime );
@@ -176,6 +206,12 @@ private:
 
 	UPROPERTY( Transient )
 	TObjectPtr< UChaosVehicleMovementComponent > VehicleMovement;
+
+	UPROPERTY( Transient )
+	TObjectPtr< UPointLightComponent > GlowLight;
+
+	UPROPERTY( Transient )
+	TObjectPtr< USpotLightComponent > GroundGlowLight;
 
 	UPROPERTY( Transient )
 	TObjectPtr< UEnhancedInputComponent > FlightInputComponent;
