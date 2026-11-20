@@ -12,6 +12,9 @@ class APlayerController;
 class UPrimitiveComponent;
 class UPointLightComponent;
 class USpotLightComponent;
+class UStaticMesh;
+class UStaticMeshComponent;
+class UMaterialInstanceDynamic;
 class UChaosVehicleMovementComponent;
 class UEnhancedInputComponent;
 class UInputAction;
@@ -140,6 +143,28 @@ public:
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Glow" )
 	float GroundGlowRange = 4000.f;
 
+	/** Glowing ring under the truck, shown only in flight mode. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
+	bool bFlightRing = true;
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
+	TSoftObjectPtr< UStaticMesh > RingMesh = TSoftObjectPtr< UStaticMesh >( FSoftObjectPath( TEXT( "/FlyingTrucks/Ring/SM_FlyingRing.SM_FlyingRing" ) ) );
+
+	/** Outer size of the ring, cm (the truck is roughly 3.5-4 m wide). */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
+	float RingDiameter = 400.f;
+
+	/** Height of the ring relative to the truck's origin, cm. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
+	float RingHeight = 30.f;
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
+	float RingSpinDegreesPerSecond = 40.f;
+
+	/** Emissive strength of the ring's material (it glows by itself; bloom does the halo). */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
+	float RingGlowIntensity = 20.f;
+
 	/** Minimum time between flight toggles, seconds. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Input" )
 	float ToggleCooldownSeconds = 0.5f;
@@ -180,6 +205,7 @@ protected:
 	bool IsAirborne( const UPrimitiveComponent* Body ) const;
 
 	void CreateGlowLights();
+	void CreateRing();
 	void UpdateGlow();
 
 	/** Sets the custom paint via reflection (avoids depending on FFactoryCustomizationData's C++ layout). */
@@ -212,6 +238,9 @@ private:
 
 	UPROPERTY( Transient )
 	TObjectPtr< USpotLightComponent > GroundGlowLight;
+
+	UPROPERTY( Transient )
+	TObjectPtr< UStaticMeshComponent > RingComponent;
 
 	UPROPERTY( Transient )
 	TObjectPtr< UEnhancedInputComponent > FlightInputComponent;

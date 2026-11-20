@@ -7,6 +7,9 @@
 #include "Components/PrimitiveComponent.h"
 #include "Components/PointLightComponent.h"
 #include "Components/SpotLightComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "EnhancedInputComponent.h"
@@ -51,6 +54,7 @@ void UFlyingTruckComponent::BeginPlay()
 	}
 
 	CreateGlowLights();
+	CreateRing();
 
 	if( bApplyDefaultPaint && GetOwner()->HasAuthority() )
 	{
@@ -272,6 +276,11 @@ void UFlyingTruckComponent::TickComponent( float DeltaTime, ELevelTick TickType,
 	if( !bIsFlying || DeltaTime <= 0.f )
 	{
 		return;
+	}
+
+	if( RingComponent )
+	{
+		RingComponent->AddLocalRotation( FRotator( 0.f, RingSpinDegreesPerSecond * DeltaTime, 0.f ) );
 	}
 
 	UPrimitiveComponent* Body = Cast< UPrimitiveComponent >( GetOwner()->GetRootComponent() );
@@ -544,4 +553,45 @@ void UFlyingTruckComponent::UpdateGlow()
 	{
 		GroundGlowLight->SetVisibility( bOn );
 	}
+	if( RingComponent )
+	{
+		RingComponent->SetVisibility( bFlightRing && bIsFlying );
+	}
+}
+
+void UFlyingTruckComponent::CreateRing()
+{
+	if( !bFlightRing || GetNetMode() == NM_DedicatedServer || RingComponent )
+	{
+		return;
+	}
+	USceneComponent* Root = GetOwner()->GetRootComponent();
+	UStaticMesh* Mesh = RingMesh.LoadSynchronous();
+	if( !Root || !Mesh )
+	{
+		UE_LOG( LogFlyingTrucks, Warning, TEXT( "%s: ring mesh %s not found." ), *GetOwner()->GetName(), *RingMesh.ToString() );
+		return;
+	}
+
+	RingComponent = NewObject< UStaticMeshComponent >( GetOwner(), TEXT( "FlyingTruckRing" ) );
+	RingComponent->SetupAttachment( Root );
+	RingComponent->SetStaticMesh( Mesh );
+	RingComponent->SetCollisionEnabled( ECollisionEnabled::NoCollision );
+	RingComponent->SetCanEverAffectNavigation( false );
+	RingComponent->SetCastShadow( false );
+	RingComponent->SetRelativeLocation( FVector( 0.f, 0.f, RingHeight ) );
+
+	// The mesh's outer diameter is its bounding box width; scale to RingDiameter.
+	const float MeshDiameter = Mesh->GetBounds().BoxExtent.X * 2.f;
+	const float Scale = MeshDiameter > KINDA_SMALL_NUMBER ? RingDiameter / MeshDiameter : 1.f;
+	RingComponent->SetRelativeScale3D( FVector( Scale ) );
+
+	if( UMaterialInstanceDynamic* MID = RingComponent->CreateDynamicMaterialInstance( 0 ) )
+	{
+		MID->SetVectorParameterValue( TEXT( "Color" ), GlowColor );
+		MID->SetScalarParameterValue( TEXT( "Intensity" ), RingGlowIntensity );
+	}
+
+	RingComponent->SetVisibility( false );
+	RingComponent->RegisterComponent();
 }
