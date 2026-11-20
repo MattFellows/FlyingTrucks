@@ -154,9 +154,9 @@ public:
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
 	float RingDiameter = 400.f;
 
-	/** Height of the ring relative to the truck's origin, cm. */
+	/** Ring centre relative to the truck's origin, cm (X forward, Z up). Back by ~1/4 radius, up by one tube thickness. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
-	float RingHeight = 30.f;
+	FVector RingOffset = FVector( -50.f, 0.f, 63.f );
 
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
 	float RingSpinDegreesPerSecond = 40.f;

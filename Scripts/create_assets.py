@@ -143,7 +143,7 @@ import math
 import os
 
 RING_MAJOR_RADIUS = 100.0   # cm; the component scales it to the wanted diameter
-RING_MINOR_RADIUS = 6.0     # cm tube radius at that size
+RING_MINOR_RADIUS = 9.0     # cm tube radius at that size (1.5x the first version)
 RING_MAJOR_SEGMENTS = 96
 RING_MINOR_SEGMENTS = 16
 

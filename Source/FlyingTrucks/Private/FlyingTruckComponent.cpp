@@ -579,7 +579,7 @@ void UFlyingTruckComponent::CreateRing()
 	RingComponent->SetCollisionEnabled( ECollisionEnabled::NoCollision );
 	RingComponent->SetCanEverAffectNavigation( false );
 	RingComponent->SetCastShadow( false );
-	RingComponent->SetRelativeLocation( FVector( 0.f, 0.f, RingHeight ) );
+	RingComponent->SetRelativeLocation( RingOffset );
 
 	// The mesh's outer diameter is its bounding box width; scale to RingDiameter.
 	const float MeshDiameter = Mesh->GetBounds().BoxExtent.X * 2.f;
