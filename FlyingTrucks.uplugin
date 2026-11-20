@@ -1,0 +1,32 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "SemVersion": "0.1.0",
+  "FriendlyName": "Flying Trucks",
+  "Description": "A truck you can fly by hand.",
+  "Category": "Transport",
+  "CreatedBy": "MattFellows",
+  "CreatedByURL": "",
+  "DocsURL": "",
+  "SupportURL": "",
+  "CanContainContent": true,
+  "EnabledByDefault": true,
+  "IsBetaVersion": true,
+  "GameVersion": ">=517554",
+  "AcceptsAnyRemoteVersion": false,
+  "Modules": [
+    {
+      "Name": "FlyingTrucks",
+      "Type": "Runtime",
+      "LoadingPhase": "PostDefault"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "SML",
+      "Enabled": true,
+      "SemVersion": "^3.12.0"
+    }
+  ]
+}
