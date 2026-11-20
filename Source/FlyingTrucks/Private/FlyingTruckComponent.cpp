@@ -171,6 +171,13 @@ void UFlyingTruckComponent::UpdateFlightContext()
 
 void UFlyingTruckComponent::Input_ToggleFlight( const FInputActionValue& Value )
 {
+	// In-game, one key press fires Started twice in the same frame (seen in 0.1.0: ON then OFF instantly).
+	if( LastToggleFrame == GFrameCounter )
+	{
+		UE_LOG( LogFlyingTrucks, Log, TEXT( "Ignoring duplicate toggle in frame %llu." ), GFrameCounter );
+		return;
+	}
+	LastToggleFrame = GFrameCounter;
 	ToggleFlying();
 }
 
@@ -254,6 +261,15 @@ void UFlyingTruckComponent::ApplyFlightForces( UPrimitiveComponent* Body, float 
 	}
 
 	Body->AddForce( Accel, NAME_None, /*bAccelChange*/ true );
+
+	DebugLogTimer -= DeltaTime;
+	if( DebugLogTimer <= 0.f )
+	{
+		DebugLogTimer = 2.f;
+		UE_LOG( LogFlyingTrucks, Log, TEXT( "Flight: speed %.0f km/h, fwd %.0f km/h, alt-check %s, throttle %.2f brake %.2f steer %.2f pitch %.0f, lift %.2fg" ),
+			Velocity.Size() * 0.036f, FwdSpeed * 0.036f, bAirborne ? TEXT( "air" ) : TEXT( "ground" ),
+			Throttle, Brake, Steer, Pitch, FMath::Min( SpeedRatio * SpeedRatio, MaxLiftG ) );
+	}
 
 	// ---- Angular: rate control around the truck's own axes ----
 	// Using FVector::CrossProduct conventions (X fwd, Y right, Z up):

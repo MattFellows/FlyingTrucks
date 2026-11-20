@@ -127,6 +127,9 @@ private:
 	UPROPERTY( Transient )
 	bool bIsFlying = false;
 
+	uint64 LastToggleFrame = 0;
+	float DebugLogTimer = 0.f;
+
 	bool bPitchUpHeld = false;
 	bool bPitchDownHeld = false;
 
