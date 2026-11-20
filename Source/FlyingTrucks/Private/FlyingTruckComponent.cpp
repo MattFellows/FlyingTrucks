@@ -12,6 +12,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "InputAction.h"
+#include "InputActionValue.h"
 #include "InputMappingContext.h"
 
 UFlyingTruckComponent::UFlyingTruckComponent()
@@ -85,7 +86,27 @@ void UFlyingTruckComponent::CreateInputObjects()
 	ToggleContext->MapKey( ToggleAction, EKeys::F );
 	ToggleContext->MapKey( ToggleAction, EKeys::Gamepad_FaceButton_Top );       // Y on Xbox / Steam Deck
 
+	auto MakePassThroughAxis = [this]( const TCHAR* Name )
+	{
+		UInputAction* Action = NewObject< UInputAction >( this, Name );
+		Action->ValueType = EInputActionValueType::Axis1D;
+		Action->bConsumeInput = false; // the truck still gets these keys (ground driving)
+		return Action;
+	};
+	ThrottleAction = MakePassThroughAxis( TEXT( "IA_FlyingTruck_Throttle" ) );
+	BrakeAction = MakePassThroughAxis( TEXT( "IA_FlyingTruck_Brake" ) );
+	SteerLeftAction = MakePassThroughAxis( TEXT( "IA_FlyingTruck_SteerLeft" ) );
+	SteerRightAction = MakePassThroughAxis( TEXT( "IA_FlyingTruck_SteerRight" ) );
+	SteerAxisAction = MakePassThroughAxis( TEXT( "IA_FlyingTruck_SteerAxis" ) );
+
 	FlightContext = NewObject< UInputMappingContext >( this, TEXT( "IMC_FlyingTruck_Flight" ) );
+	FlightContext->MapKey( ThrottleAction, EKeys::W );
+	FlightContext->MapKey( ThrottleAction, EKeys::Gamepad_RightTriggerAxis );
+	FlightContext->MapKey( BrakeAction, EKeys::S );
+	FlightContext->MapKey( BrakeAction, EKeys::Gamepad_LeftTriggerAxis );
+	FlightContext->MapKey( SteerLeftAction, EKeys::A );
+	FlightContext->MapKey( SteerRightAction, EKeys::D );
+	FlightContext->MapKey( SteerAxisAction, EKeys::Gamepad_LeftX );
 	FlightContext->MapKey( PitchUpAction, EKeys::SpaceBar );
 	FlightContext->MapKey( PitchUpAction, EKeys::Gamepad_FaceButton_Bottom );   // A
 	FlightContext->MapKey( PitchDownAction, EKeys::LeftControl );
@@ -113,6 +134,16 @@ void UFlyingTruckComponent::BindToController( APlayerController* PlayerControlle
 		FlightInputComponent = NewObject< UEnhancedInputComponent >( this, TEXT( "FlyingTruckInput" ) );
 		FlightInputComponent->BindAction( ToggleAction, ETriggerEvent::Started, this, &UFlyingTruckComponent::Input_ToggleFlight );
 		FlightInputComponent->BindAction( ToggleAction, ETriggerEvent::Completed, this, &UFlyingTruckComponent::Input_ToggleReleased );
+		FlightInputComponent->BindAction( ThrottleAction, ETriggerEvent::Triggered, this, &UFlyingTruckComponent::Input_Throttle );
+		FlightInputComponent->BindAction( ThrottleAction, ETriggerEvent::Completed, this, &UFlyingTruckComponent::Input_ThrottleReleased );
+		FlightInputComponent->BindAction( BrakeAction, ETriggerEvent::Triggered, this, &UFlyingTruckComponent::Input_Brake );
+		FlightInputComponent->BindAction( BrakeAction, ETriggerEvent::Completed, this, &UFlyingTruckComponent::Input_BrakeReleased );
+		FlightInputComponent->BindAction( SteerLeftAction, ETriggerEvent::Triggered, this, &UFlyingTruckComponent::Input_SteerLeft );
+		FlightInputComponent->BindAction( SteerLeftAction, ETriggerEvent::Completed, this, &UFlyingTruckComponent::Input_SteerLeftReleased );
+		FlightInputComponent->BindAction( SteerRightAction, ETriggerEvent::Triggered, this, &UFlyingTruckComponent::Input_SteerRight );
+		FlightInputComponent->BindAction( SteerRightAction, ETriggerEvent::Completed, this, &UFlyingTruckComponent::Input_SteerRightReleased );
+		FlightInputComponent->BindAction( SteerAxisAction, ETriggerEvent::Triggered, this, &UFlyingTruckComponent::Input_SteerAxis );
+		FlightInputComponent->BindAction( SteerAxisAction, ETriggerEvent::Completed, this, &UFlyingTruckComponent::Input_SteerAxisReleased );
 		FlightInputComponent->BindAction( PitchUpAction, ETriggerEvent::Started, this, &UFlyingTruckComponent::Input_PitchUpPressed );
 		FlightInputComponent->BindAction( PitchUpAction, ETriggerEvent::Completed, this, &UFlyingTruckComponent::Input_PitchUpReleased );
 		FlightInputComponent->BindAction( PitchDownAction, ETriggerEvent::Started, this, &UFlyingTruckComponent::Input_PitchDownPressed );
@@ -144,7 +175,8 @@ void UFlyingTruckComponent::UnbindFromController()
 		BoundController->PopInputComponent( FlightInputComponent );
 	}
 	BoundController = nullptr;
-	bPitchUpHeld = bPitchDownHeld = bToggleKeyHeld = false;
+	bToggleKeyHeld = false;
+	ResetFlightInputs();
 }
 
 void UFlyingTruckComponent::UpdateFlightContext()
@@ -166,9 +198,21 @@ void UFlyingTruckComponent::UpdateFlightContext()
 	else
 	{
 		Subsystem->RemoveMappingContext( FlightContext );
-		bPitchUpHeld = bPitchDownHeld = false;
+		ResetFlightInputs();
 	}
 }
+
+void UFlyingTruckComponent::ResetFlightInputs()
+{
+	bPitchUpHeld = bPitchDownHeld = false;
+	ThrottleInput = BrakeInput = SteerLeftInput = SteerRightInput = SteerAxisInput = 0.f;
+}
+
+void UFlyingTruckComponent::Input_Throttle( const FInputActionValue& Value ) { ThrottleInput = FMath::Clamp( Value.Get< float >(), 0.f, 1.f ); }
+void UFlyingTruckComponent::Input_Brake( const FInputActionValue& Value ) { BrakeInput = FMath::Clamp( Value.Get< float >(), 0.f, 1.f ); }
+void UFlyingTruckComponent::Input_SteerLeft( const FInputActionValue& Value ) { SteerLeftInput = FMath::Clamp( Value.Get< float >(), 0.f, 1.f ); }
+void UFlyingTruckComponent::Input_SteerRight( const FInputActionValue& Value ) { SteerRightInput = FMath::Clamp( Value.Get< float >(), 0.f, 1.f ); }
+void UFlyingTruckComponent::Input_SteerAxis( const FInputActionValue& Value ) { SteerAxisInput = FMath::Clamp( Value.Get< float >(), -1.f, 1.f ); }
 
 void UFlyingTruckComponent::Input_ToggleFlight( const FInputActionValue& Value )
 {
@@ -242,7 +286,14 @@ void UFlyingTruckComponent::ApplyFlightForces( UPrimitiveComponent* Body, float 
 	const bool bAirborne = IsAirborne( Body );
 
 	float Throttle = 0.f, Brake = 0.f, Steer = 0.f;
-	if( VehicleMovement )
+	if( BoundController )
+	{
+		// Our own flight-mode bindings: the game's vehicle input freezes while airborne.
+		Throttle = ThrottleInput;
+		Brake = BrakeInput;
+		Steer = FMath::Clamp( SteerRightInput - SteerLeftInput + SteerAxisInput, -1.f, 1.f );
+	}
+	else if( VehicleMovement )
 	{
 		Throttle = VehicleMovement->GetThrottleInput();
 		Brake = VehicleMovement->GetBrakeInput();

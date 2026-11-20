@@ -28,7 +28,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam( FOnFlightModeChanged, bool, bIsFlyi
  *   F / Gamepad Y            toggle flight mode
  *   Space / Gamepad A        pitch nose up   (flight mode only)
  *   Left Ctrl / Gamepad B    pitch nose down (flight mode only)
- *   Normal throttle / brake  thrust; normal steering banks and turns.
+ *   W / Right trigger        thrust;  S / Left trigger: air brake / reverse thrust
+ *   A, D / Left stick        bank and turn
+ *   (read by this component in flight mode, and still passed on to the truck)
  *
  * Single-player first: forces are applied on the machine controlling the vehicle.
  */
@@ -72,9 +74,9 @@ public:
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Tuning" )
 	float TakeoffSpeed = 2200.f;
 
-	/** Cap on lift, in multiples of gravity. */
+	/** Cap on lift, in multiples of gravity. 1 = level flight holds altitude above TakeoffSpeed; climb by pitching up. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Tuning" )
-	float MaxLiftG = 1.6f;
+	float MaxLiftG = 1.0f;
 
 	/** How quickly sideways / vertical slip is turned into forward motion, 1/s. Higher = more "on rails". */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Tuning" )
@@ -120,6 +122,19 @@ protected:
 
 	void Input_ToggleFlight( const FInputActionValue& Value );
 	void Input_ToggleReleased( const FInputActionValue& Value );
+	// Flight-mode copies of the driving controls (the game stops updating its own vehicle input in the air).
+	void Input_Throttle( const FInputActionValue& Value );
+	void Input_ThrottleReleased( const FInputActionValue& Value ) { ThrottleInput = 0.f; }
+	void Input_Brake( const FInputActionValue& Value );
+	void Input_BrakeReleased( const FInputActionValue& Value ) { BrakeInput = 0.f; }
+	void Input_SteerLeft( const FInputActionValue& Value );
+	void Input_SteerLeftReleased( const FInputActionValue& Value ) { SteerLeftInput = 0.f; }
+	void Input_SteerRight( const FInputActionValue& Value );
+	void Input_SteerRightReleased( const FInputActionValue& Value ) { SteerRightInput = 0.f; }
+	void Input_SteerAxis( const FInputActionValue& Value );
+	void Input_SteerAxisReleased( const FInputActionValue& Value ) { SteerAxisInput = 0.f; }
+	void ResetFlightInputs();
+
 	void Input_PitchUpPressed( const FInputActionValue& Value ) { bPitchUpHeld = true; }
 	void Input_PitchUpReleased( const FInputActionValue& Value ) { bPitchUpHeld = false; }
 	void Input_PitchDownPressed( const FInputActionValue& Value ) { bPitchDownHeld = true; }
@@ -135,6 +150,12 @@ private:
 	double LastToggleTime = -1000.0;
 	bool bToggleKeyHeld = false;
 	float DebugLogTimer = 0.f;
+
+	float ThrottleInput = 0.f;
+	float BrakeInput = 0.f;
+	float SteerLeftInput = 0.f;
+	float SteerRightInput = 0.f;
+	float SteerAxisInput = 0.f;
 
 	bool bPitchUpHeld = false;
 	bool bPitchDownHeld = false;
@@ -156,6 +177,21 @@ private:
 
 	UPROPERTY( Transient )
 	TObjectPtr< UInputAction > PitchDownAction;
+
+	UPROPERTY( Transient )
+	TObjectPtr< UInputAction > ThrottleAction;
+
+	UPROPERTY( Transient )
+	TObjectPtr< UInputAction > BrakeAction;
+
+	UPROPERTY( Transient )
+	TObjectPtr< UInputAction > SteerLeftAction;
+
+	UPROPERTY( Transient )
+	TObjectPtr< UInputAction > SteerRightAction;
+
+	UPROPERTY( Transient )
+	TObjectPtr< UInputAction > SteerAxisAction;
 
 	/** Always active while driving: flight toggle. */
 	UPROPERTY( Transient )
