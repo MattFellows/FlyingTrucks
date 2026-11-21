@@ -105,6 +105,7 @@ void UFlyingTruckComponent::BeginPlay()
 
 void UFlyingTruckComponent::EndPlay( const EEndPlayReason::Type EndPlayReason )
 {
+	ShowHiddenDriver();
 	UnbindFromController();
 	if( UWorld* World = GetWorld() )
 	{
@@ -579,6 +580,7 @@ void UFlyingTruckComponent::TickComponent( float DeltaTime, ELevelTick TickType,
 
 	UpdateWings( DeltaTime );
 	UpdateRing( DeltaTime );
+	UpdateDriverVisibility();
 
 	if( !bIsFlying || DeltaTime <= 0.f )
 	{
@@ -1059,6 +1061,49 @@ void UFlyingTruckComponent::HideVehicleMeshes()
 			Mesh->SetHiddenInGame( true );
 		}
 	}
+}
+
+void UFlyingTruckComponent::UpdateDriverVisibility()
+{
+	if( !bHideDriver || GetNetMode() == NM_DedicatedServer )
+	{
+		return;
+	}
+	const AFGDriveablePawn* Driveable = Cast< AFGDriveablePawn >( GetOwner() );
+	AActor* Driver = Driveable ? Driveable->GetDriver() : nullptr;
+	if( Driver != HiddenDriver.Get() )
+	{
+		ShowHiddenDriver();
+		HiddenDriver = Driver;
+	}
+	if( !Driver )
+	{
+		return;
+	}
+	// Only this machine's view, nothing replicated; re-checked every frame in case the game shows them again.
+	TArray< UMeshComponent* > Meshes;
+	Driver->GetComponents< UMeshComponent >( Meshes );
+	for( UMeshComponent* Mesh : Meshes )
+	{
+		if( !Mesh->bHiddenInGame )
+		{
+			Mesh->SetHiddenInGame( true );
+			HiddenDriverMeshes.AddUnique( Mesh );
+		}
+	}
+}
+
+void UFlyingTruckComponent::ShowHiddenDriver()
+{
+	for( const TWeakObjectPtr< UMeshComponent >& Mesh : HiddenDriverMeshes )
+	{
+		if( Mesh.IsValid() )
+		{
+			Mesh->SetHiddenInGame( false );
+		}
+	}
+	HiddenDriverMeshes.Reset();
+	HiddenDriver = nullptr;
 }
 
 void UFlyingTruckComponent::CreateBodyParts()

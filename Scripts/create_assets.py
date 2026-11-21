@@ -595,6 +595,7 @@ add_flight_component(bp_mbot)
 compile_bp(bp_mbot)
 mt = flight_template(bp_mbot)
 mt.set_editor_property("hide_vehicle_mesh", True)
+mt.set_editor_property("hide_driver", True)
 mt.set_editor_property("body_parts", parts)
 # Swing wings from the reference drawing: swept back on the ground, out to the side in flight.
 wing_mesh_m = mbot_meshes["Wing"]

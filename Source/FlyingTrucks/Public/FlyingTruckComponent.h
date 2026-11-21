@@ -305,6 +305,10 @@ public:
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Body" )
 	TArray< FFlyingBodyPart > BodyParts;
 
+	/** Hide the driver's character while they're in this vehicle (M-Bot: the seat would sit on top of the hull). */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Body" )
+	bool bHideDriver = false;
+
 	/**
 	 * Hover (M-Bot): in flight mode, hold height when slow or stopped, level out, and use the pitch
 	 * keys to rise/sink. Above HoverSpeed it flies like the trucks.
@@ -391,6 +395,9 @@ protected:
 	void CreateBodyParts();
 	/** Hides every mesh on the vehicle that isn't one of ours (bHideVehicleMesh). */
 	void HideVehicleMeshes();
+	/** bHideDriver: hides the current driver's meshes, and shows the previous driver's again. */
+	void UpdateDriverVisibility();
+	void ShowHiddenDriver();
 
 	/** Sets the custom paint via reflection (avoids depending on FFactoryCustomizationData's C++ layout). */
 	void ApplyDefaultPaint();
@@ -497,6 +504,9 @@ private:
 	TArray< TObjectPtr< UStaticMeshComponent > > BodyPartComponents;
 
 	FTimerHandle HideMeshTimer;
+
+	TWeakObjectPtr< AActor > HiddenDriver;
+	TArray< TWeakObjectPtr< UMeshComponent > > HiddenDriverMeshes;
 
 	/** 0 = folded into the body, 1 = fully out. */
 	float WingDeployAlpha = 0.f;
