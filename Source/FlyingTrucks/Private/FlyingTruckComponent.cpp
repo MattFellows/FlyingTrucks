@@ -26,6 +26,10 @@
 #include "FGInventoryComponent.h"
 #include "Resources/FGItemDescriptor.h"
 #include "WheeledVehicles/FGWheeledVehicle.h"
+#include "FGDriveablePawn.h"
+#include "FGCharacterPlayer.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
 
 #define LOCTEXT_NAMESPACE "FlyingTrucks"
 
@@ -78,6 +82,7 @@ void UFlyingTruckComponent::BeginPlay()
 		}
 	}
 
+	FitToVehicle();
 	CreateGlowLights();
 	CreateRing();
 	CreateWings();
@@ -307,7 +312,7 @@ void UFlyingTruckComponent::SetFlying( bool bNewFlying )
 	}
 	if( bNewFlying && FuelItemClass && GetFuelCount() <= 0 )
 	{
-		NotifyDriver( FText::Format( LOCTEXT( "NoFuel", "Flight needs {0} in the truck's cargo." ),
+		NotifyDriver( FText::Format( LOCTEXT( "NoFuel", "Flight needs {0} in the vehicle's cargo or your inventory." ),
 			UFGItemDescriptor::GetItemName( TSubclassOf< UFGItemDescriptor >( FuelItemClass.Get() ) ) ) );
 		return;
 	}
@@ -325,15 +330,94 @@ void UFlyingTruckComponent::SetFlying( bool bNewFlying )
 	}
 }
 
+void UFlyingTruckComponent::GetFuelInventories( TArray< UFGInventoryComponent* >& OutInventories ) const
+{
+	if( const AFGWheeledVehicle* Vehicle = Cast< AFGWheeledVehicle >( GetOwner() ) )
+	{
+		if( UFGInventoryComponent* Cargo = Vehicle->GetStorageInventory() )
+		{
+			OutInventories.Add( Cargo );
+		}
+	}
+	// The Factory Cart has no cargo, and it's handy on the others too.
+	if( const AFGDriveablePawn* Driveable = Cast< AFGDriveablePawn >( GetOwner() ) )
+	{
+		if( const AFGCharacterPlayer* Driver = Driveable->GetDriver() )
+		{
+			if( UFGInventoryComponent* Pockets = Driver->GetInventory() )
+			{
+				OutInventories.Add( Pockets );
+			}
+		}
+	}
+}
+
 int32 UFlyingTruckComponent::GetFuelCount() const
 {
-	const AFGWheeledVehicle* Vehicle = Cast< AFGWheeledVehicle >( GetOwner() );
-	UFGInventoryComponent* Cargo = Vehicle ? Vehicle->GetStorageInventory() : nullptr;
-	if( !Cargo || !FuelItemClass )
+	if( !FuelItemClass )
 	{
 		return 0;
 	}
-	return Cargo->GetNumItems( TSubclassOf< UFGItemDescriptor >( FuelItemClass.Get() ) );
+	TArray< UFGInventoryComponent* > Inventories;
+	GetFuelInventories( Inventories );
+	int32 Count = 0;
+	for( UFGInventoryComponent* Inventory : Inventories )
+	{
+		Count += Inventory->GetNumItems( TSubclassOf< UFGItemDescriptor >( FuelItemClass.Get() ) );
+	}
+	return Count;
+}
+
+namespace
+{
+	/** Bounds of an actor's main (root) skeletal mesh asset, in actor space. */
+	bool GetVehicleMeshBox( const AActor* Actor, FBox& OutBox )
+	{
+		const USkeletalMeshComponent* Mesh = Actor ? Cast< USkeletalMeshComponent >( Actor->GetRootComponent() ) : nullptr;
+		if( !Mesh && Actor )
+		{
+			Mesh = Actor->FindComponentByClass< USkeletalMeshComponent >();
+		}
+		const USkeletalMesh* Asset = Mesh ? Mesh->GetSkeletalMeshAsset() : nullptr;
+		if( !Asset )
+		{
+			return false;
+		}
+		OutBox = Asset->GetImportedBounds().GetBox();
+		return OutBox.IsValid && !OutBox.GetExtent().IsNearlyZero();
+	}
+}
+
+void UFlyingTruckComponent::FitToVehicle()
+{
+	if( !bScaleToVehicle || ReferenceVehicle.IsNull() )
+	{
+		return;
+	}
+	UClass* RefClass = ReferenceVehicle.LoadSynchronous();
+	if( !RefClass || GetOwner()->IsA( RefClass ) )
+	{
+		return; // the Truck: values are tuned for it
+	}
+	FBox Own, Ref;
+	if( !GetVehicleMeshBox( GetOwner(), Own ) || !GetVehicleMeshBox( RefClass->GetDefaultObject< AActor >(), Ref ) )
+	{
+		UE_LOG( LogFlyingTrucks, Warning, TEXT( "%s: couldn't measure the vehicle; using Truck-sized ring/wings." ), *GetOwner()->GetName() );
+		return;
+	}
+	const FVector OwnC = Own.GetCenter(), RefC = Ref.GetCenter();
+	const FVector S = Own.GetExtent() / Ref.GetExtent().ComponentMax( FVector( 1.f ) );
+	auto Map = [&]( const FVector& P ) { return OwnC + ( P - RefC ) * S; };
+
+	RingDiameter *= S.Y;
+	RingOffset = Map( RingOffset );
+	GlowOffset = Map( GlowOffset );
+	GlowRadius *= S.GetMax();
+	WingPivot = Map( WingPivot );
+	WingScale *= FMath::Min( S.X, S.Y );
+	UE_LOG( LogFlyingTrucks, Log, TEXT( "%s: mesh box %s vs truck %s -> scale %s; ring %.0f at %s, wings x%.2f at %s" ),
+		*GetOwner()->GetName(), *Own.ToString(), *Ref.ToString(), *S.ToCompactString(), RingDiameter, *RingOffset.ToCompactString(),
+		WingScale, *WingPivot.ToCompactString() );
 }
 
 void UFlyingTruckComponent::TickFuel( float DeltaTime )
@@ -357,8 +441,16 @@ void UFlyingTruckComponent::TickFuel( float DeltaTime )
 	int32 Count = GetFuelCount();
 	if( Count > 0 && bBurnNow )
 	{
-		const AFGWheeledVehicle* Vehicle = Cast< AFGWheeledVehicle >( GetOwner() );
-		Vehicle->GetStorageInventory()->Remove( TSubclassOf< UFGItemDescriptor >( FuelItemClass.Get() ), 1 );
+		TArray< UFGInventoryComponent* > Inventories;
+		GetFuelInventories( Inventories );
+		for( UFGInventoryComponent* Inventory : Inventories )
+		{
+			if( Inventory->HasItems( TSubclassOf< UFGItemDescriptor >( FuelItemClass.Get() ), 1 ) )
+			{
+				Inventory->Remove( TSubclassOf< UFGItemDescriptor >( FuelItemClass.Get() ), 1 );
+				break;
+			}
+		}
 		FlightSecondsSinceBurn -= FlightSecondsPerFuelItem;
 		--Count;
 		UE_LOG( LogFlyingTrucks, Log, TEXT( "%s: burned 1 fuel item, %d left." ), *GetOwner()->GetName(), Count );

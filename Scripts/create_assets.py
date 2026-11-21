@@ -254,12 +254,96 @@ stone_schem.set_editor_property("m_unlocks", [scan_unlock])
 save(bp_stone_schem)
 log("Acclivity Stone assets saved")
 
+# --- 4c. Flying Explorer, Tractor and Factory Cart -----------------------------
+FLIGHT_HELP = ("Press F (Y on gamepad) while driving to toggle flight mode; Space/A pitches up, C or Ctrl/B pitches down. "
+               "Flight burns one Acclivity Stone per minute from the cargo or your inventory.")
+
+
+def add_flight_component(bp):
+    handles = sds.k2_gather_subobject_data_for_blueprint(bp)
+    for h in handles:
+        obj = unreal.SubobjectDataBlueprintFunctionLibrary.get_associated_object(unreal.SubobjectDataBlueprintFunctionLibrary.get_data(h))
+        if obj is not None and isinstance(obj, unreal.FlyingTruckComponent):
+            return
+    params = unreal.AddNewSubobjectParams(parent_handle=handles[0], new_class=unreal.FlyingTruckComponent, blueprint_context=bp)
+    new_handle, fail_reason = sds.add_new_subobject(params)
+    if not fail_reason.is_empty():
+        raise RuntimeError("add_new_subobject failed: " + str(fail_reason))
+    sds.rename_subobject(new_handle, unreal.Text("FlyingTruck"))
+    log("Added FlyingTruckComponent to " + bp.get_name())
+
+
+def make_flying_vehicle(key, display, vehicle_parent, desc_parent):
+    bp = make_blueprint("BP_Flying" + key, load_cls(vehicle_parent), ROOT + "/Vehicles")
+    add_flight_component(bp)
+    compile_bp(bp)
+    cdo = cdo_of(bp)
+    cdo.set_editor_property("m_display_name", unreal.Text(display))
+    cdo.set_editor_property("m_description", unreal.Text("A " + display[7:] + " that can fly. " + FLIGHT_HELP))
+    save(bp)
+    d = make_blueprint("Desc_Flying" + key, load_cls(desc_parent), ROOT + "/Vehicles")
+    compile_bp(d)
+    dc = cdo_of(d)
+    dc.set_editor_property("m_display_name", unreal.Text(display))
+    dc.set_editor_property("m_description", unreal.Text("A " + display[7:] + " that can fly. " + FLIGHT_HELP))
+    return bp, d, dc
+
+
+def make_flying_recipe(key, display, recipe_parent, desc_bp):
+    r = make_blueprint("Recipe_Flying" + key, load_cls(recipe_parent), ROOT + "/Vehicles")
+    compile_bp(r)
+    rc = cdo_of(r)
+    rc.set_editor_property("m_product", [unreal.ItemAmount(item_class=desc_bp.generated_class(), amount=1)])
+    rc.set_editor_property("m_display_name", unreal.Text(display))
+    save(r)
+    return r
+
+
+sds = unreal.get_engine_subsystem(unreal.SubobjectDataSubsystem)
+flying_recipes = []
+VEH_DIR = "/Game/FactoryGame/Buildable/Vehicle/"
+for key, display, folder, recipe in (("Explorer", "Flying Explorer", "Explorer", "Recipe_Explorer"),
+                                     ("Tractor", "Flying Tractor", "Tractor", "Recipe_Tractor")):
+    bp, d, dc = make_flying_vehicle(key, display, VEH_DIR + "%s/BP_%s.BP_%s_C" % (folder, key, key),
+                                    VEH_DIR + "%s/Desc_%s.Desc_%s_C" % (folder, key, key))
+    dc.set_editor_property("m_vehicle_class", bp.generated_class())
+    save(d)
+    flying_recipes.append(make_flying_recipe(key, display, "/Game/FactoryGame/Recipes/Vehicle/%s.%s_C" % (recipe, recipe), d))
+
+# The Factory Cart is an equipment item: the dispenser you equip spawns the cart.
+cart_bp, cart_desc, cart_dc = make_flying_vehicle("FactoryCart", "Flying Factory Cart",
+                                                  VEH_DIR + "Golfcart/BP_Golfcart.BP_Golfcart_C",
+                                                  "/Game/FactoryGame/Resource/Equipment/GolfCart/Desc_GolfCart.Desc_GolfCart_C")
+dispenser = make_blueprint("Equip_FlyingFactoryCartDispenser",
+                           load_cls("/Game/FactoryGame/Equipment/GolfCart/Equip_GolfCartDispenser.Equip_GolfCartDispenser_C"),
+                           ROOT + "/Vehicles")
+compile_bp(dispenser)
+cdo_of(dispenser).set_editor_property("m_golf_cart_class", cart_bp.generated_class())
+save(dispenser)
+cart_dc.set_editor_property("m_equipment_class", dispenser.generated_class())
+save(cart_desc)
+flying_recipes.append(make_flying_recipe("FactoryCart", "Flying Factory Cart",
+                                         "/Game/FactoryGame/Recipes/Vehicle/Recipe_FactoryCart.Recipe_FactoryCart_C", cart_desc))
+
+bp_veh_schem = make_blueprint("Schematic_FlyingVehicles", unreal.FGSchematic)
+compile_bp(bp_veh_schem)
+veh_schem = cdo_of(bp_veh_schem)
+veh_schem.set_editor_property("m_type", unreal.SchematicType.EST_CUSTOM)
+veh_schem.set_editor_property("m_display_name", unreal.Text("Flying Vehicles"))
+veh_schem.set_editor_property("m_tech_tier", 0)
+veh_schem.set_editor_property("m_time_to_complete", 0.0)
+veh_unlock = unreal.new_object(BP_UnlockRecipe, outer=veh_schem)
+veh_unlock.set_editor_property("m_recipes", [r.generated_class() for r in flying_recipes])
+veh_schem.set_editor_property("m_unlocks", [veh_unlock])
+save(bp_veh_schem)
+log("Flying vehicles saved")
+
 # --- 5. Root game world module -------------------------------------------
 bp_root = make_blueprint("RootGameWorld_FlyingTrucks", unreal.GameWorldModule)
 compile_bp(bp_root)
 root = cdo_of(bp_root)
 root.set_editor_property("root_module", True)
-root.set_editor_property("m_schematics", [bp_schem.generated_class(), bp_stone_schem.generated_class()])
+root.set_editor_property("m_schematics", [bp_schem.generated_class(), bp_stone_schem.generated_class(), bp_veh_schem.generated_class()])
 root.set_editor_property("mod_subsystems", [unreal.FlyingTrucksSubsystem.static_class()])
 save(bp_root)
 

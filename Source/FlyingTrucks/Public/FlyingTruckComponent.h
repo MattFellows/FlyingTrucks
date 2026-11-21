@@ -64,7 +64,7 @@ struct FFlyingTruckInput
  *   A, D / Left stick        bank and turn
  *   (read by this component in flight mode, and still passed on to the truck)
  *
- * Flight needs Acclivity Stone in the truck's cargo: one stone is burned per minute of flight, and the
+ * Flight needs Acclivity Stone in the vehicle's cargo or the driver's inventory: one stone is burned per minute of flight, and the
  * truck drops out of flight mode when the last one is used up. The server decides; the driver gets a
  * chat message when flight is refused or the stone runs out.
  *
@@ -234,7 +234,17 @@ public:
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
 	FLinearColor WingColor = FLinearColor( 0.035f, 0.035f, 0.04f );
 
-	/** Item that must be in the truck's cargo to fly (Acclivity Stone). Empty = no fuel needed. */
+	/**
+	 * Fit the ring, glow and wings to this vehicle: the values above are tuned for the Truck, and are
+	 * scaled by this vehicle's mesh size relative to ReferenceVehicle's (no change on the Truck itself).
+	 */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Fit" )
+	bool bScaleToVehicle = true;
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Fit" )
+	TSoftClassPtr< AActor > ReferenceVehicle = TSoftClassPtr< AActor >( FSoftObjectPath( TEXT( "/Game/FactoryGame/Buildable/Vehicle/Truck/BP_Truck.BP_Truck_C" ) ) );
+
+	/** Item that must be in the vehicle's cargo or the driver's inventory to fly (Acclivity Stone). Empty = no fuel needed. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Fuel" )
 	TSoftClassPtr< UObject > FlightFuelItem = TSoftClassPtr< UObject >( FSoftObjectPath( TEXT( "/FlyingTrucks/Resources/Desc_AcclivityStone.Desc_AcclivityStone_C" ) ) );
 
@@ -312,8 +322,12 @@ protected:
 	void SendInputToServer( float DeltaTime );
 
 	// ---- Acclivity Stone (server decides) ----
-	/** Stones in the truck's cargo (server). */
+	/** Where stone is taken from, in order: the vehicle's cargo, then the driver's inventory (server). */
+	void GetFuelInventories( TArray< class UFGInventoryComponent* >& OutInventories ) const;
+	/** Stones available to this vehicle (server). */
 	int32 GetFuelCount() const;
+	/** Scales the Truck-tuned ring/glow/wing settings to this vehicle's size. */
+	void FitToVehicle();
 	/** Server: burn fuel while flying, land when it runs out. */
 	void TickFuel( float DeltaTime );
 	/** Shows a chat line to whoever is driving (locally, or via a client RPC). */
