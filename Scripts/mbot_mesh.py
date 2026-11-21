@@ -108,36 +108,62 @@ def prism(mesh, outline, thickness_dir, thickness):
         mesh.tri(top[i], bot[j], bot[i], inside)
 
 
+WING_SWING_DEGREES = 34.0  # wings swing out by this much in flight (the faint outline in the reference drawing)
+
+
+def _rot_yaw(p, deg):
+    a = math.radians(deg)
+    return (p[0] * math.cos(a) - p[1] * math.sin(a), p[0] * math.sin(a) + p[1] * math.cos(a), p[2])
+
+
 def build_mbot():
-    """Returns {"Hull": Mesh, "Canopy": Mesh, "Engine": Mesh}."""
+    """Returns {"Hull", "Canopy", "Engine", "Wing"} meshes. Nose along +X.
+
+    Hull: central body with a rounded front pod, two big forward prongs either side, an engine block between
+    two thin rear spikes, and small canted fins. Wing: the right main wing in its *extended* (flight) pose,
+    pivoting on its root's front corner at the origin; the game swings it back WING_SWING_DEGREES on the ground.
+    """
     hull = Mesh()
-    # Long, low, pointed fuselage that swells over the middle and narrows to the engine.
+    # Central body: engine block at the back, a narrower neck, then the rounded front pod.
     loft(hull, [
-        (400, 112, 3, 2),
-        (355, 113, 28, 18),
-        (280, 117, 66, 40),
-        (160, 123, 96, 56),
-        (20, 127, 110, 64),
-        (-130, 130, 104, 60),
-        (-250, 132, 84, 50),
-        (-330, 134, 60, 40),
-    ], cap_end=True)
-    # Swept wings, a little below the middle of the hull.
+        (-310, 120, 58, 38),
+        (-200, 124, 86, 52),
+        (20, 127, 90, 56),
+        (80, 128, 62, 46),
+        (120, 129, 52, 42),
+        (150, 130, 76, 54),
+        (215, 130, 80, 56),
+        (245, 130, 66, 47),
+        (262, 130, 36, 27),
+        (267, 130, 6, 5),
+    ], power=3.0)
     for side in (1, -1):
-        prism(hull, [(90, 92 * side, 116), (-245, 395 * side, 112), (-310, 395 * side, 112), (-235, 92 * side, 116)],
-              (0, 0, 1), 16)
-        # Twin tail fins, canted outwards.
-        lean = 0.35
-        fin = [(-175, 50 * side, 168), (-322, 50 * side, 172), (-350, (50 + 110 * lean) * side, 285), (-292, (50 + 110 * lean) * side, 285)]
-        prism(hull, fin, (0, 1, -lean * side), 10)
+        # Forward prongs: chunky angular blades that reach past the pod to sharp points.
+        prong = [(380, 146 * side, 128), (140, 214 * side, 128), (-60, 180 * side, 128), (-60, 90 * side, 128), (150, 76 * side, 128)]
+        prism(hull, prong, (0, 0, 1), 42)
+        # Thin spikes either side of the engine.
+        prism(hull, [(-195, 62 * side, 122), (-195, 38 * side, 122), (-385, 50 * side, 122)], (0, 0, 1), 14)
+        # Small canted fins behind the wing roots.
+        lean = 0.45
+        fin = [(-150, 100 * side, 160), (-235, 100 * side, 160), (-268, (100 + 70 * lean) * side, 225), (-222, (100 + 70 * lean) * side, 225)]
+        prism(hull, fin, (0, 1, -lean * side), 8)
     canopy = Mesh()
     loft(canopy, [
-        (165, 166, 4, 3),
-        (125, 172, 40, 30),
-        (45, 180, 56, 42),
-        (-35, 178, 52, 38),
-        (-100, 168, 26, 22),
+        (258, 148, 5, 4),
+        (238, 158, 48, 30),
+        (185, 166, 60, 38),
+        (140, 160, 44, 28),
+        (118, 150, 6, 4),
     ])
     engine = Mesh()
-    loft(engine, [(-322, 134, 50, 33), (-352, 134, 46, 30)], sides=24)
-    return {"Hull": hull, "Canopy": canopy, "Engine": engine}
+    loft(engine, [(-302, 120, 48, 30), (-330, 120, 44, 27)], sides=24)
+
+    # Right main wing (+Y), folded (ground) pose relative to its pivot, then swung out to the flight pose.
+    folded = [(0.0, 0.0, 0.0), (-390.0, 120.0, 0.0), (-200.0, -134.0, 0.0)]
+    extended = [_rot_yaw(p, -WING_SWING_DEGREES) for p in folded]
+    wing = Mesh()
+    prism(wing, extended, (0, 0, 1), 14)
+    return {"Hull": hull, "Canopy": canopy, "Engine": engine, "Wing": wing}
+
+
+WING_PIVOT = (10.0, 200.0, 125.0)  # right wing's pivot on the body (front corner of the wing root), before scaling

@@ -265,6 +265,10 @@ public:
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
 	float WingPlateSlideFraction = 0.25f;
 
+	/** > 0: fold by exactly this many degrees instead of swinging the tip in alongside the body (M-Bot's swing wings). */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
+	float WingFoldYawOverride = 0.f;
+
 	/** Extra inward swing when folded, degrees, so the tip ends up well inside the body. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
 	float WingExtraFoldDegrees = 3.f;
@@ -282,6 +286,10 @@ public:
 	 */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Fit" )
 	bool bScaleToVehicle = true;
+
+	/** Scale the wings with the vehicle (off for vehicles with their own wing mesh, like M-Bot). */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Fit" )
+	bool bFitWings = true;
 
 	/** Per-vehicle touch-ups applied after fitting (e.g. the Tractor's wings are a bit smaller and lower). */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Fit" )

@@ -417,8 +417,11 @@ void UFlyingTruckComponent::FitToVehicle()
 	RingOffset = Map( RingOffset );
 	GlowOffset = Map( GlowOffset );
 	GlowRadius *= S.GetMax();
-	WingPivot = Map( WingPivot );
-	WingScale *= FMath::Min( S.X, S.Y );
+	if( bFitWings )
+	{
+		WingPivot = Map( WingPivot );
+		WingScale *= FMath::Min( S.X, S.Y );
+	}
 	UE_LOG( LogFlyingTrucks, Log, TEXT( "%s: mesh box %s vs truck %s -> scale %s; ring %.0f at %s, wings x%.2f at %s" ),
 		*GetOwner()->GetName(), *Own.ToString(), *Ref.ToString(), *S.ToCompactString(), RingDiameter, *RingOffset.ToCompactString(),
 		WingScale, *WingPivot.ToCompactString() );
@@ -944,7 +947,8 @@ void UFlyingTruckComponent::CreateWings()
 	const float Span = Bounds.BoxExtent.Y * 2.f * WingScale;
 	WingPlateThickness = Bounds.BoxExtent.Z * 2.f * WingScale;
 	// Folding swings the tip in until the leading edge lies along the truck, plus a little extra.
-	WingFoldYaw = FMath::RadiansToDegrees( FMath::Atan2( Span, FMath::Max( Chord, 1.f ) ) ) + WingExtraFoldDegrees;
+	WingFoldYaw = WingFoldYawOverride > 0.f ? WingFoldYawOverride
+		: FMath::RadiansToDegrees( FMath::Atan2( Span, FMath::Max( Chord, 1.f ) ) ) + WingExtraFoldDegrees;
 	WingLeadingEdgeLength = FMath::Sqrt( Chord * Chord + Span * Span );
 	WingLeadingEdgeDir = FVector( -Chord, Span, 0.f ).GetSafeNormal();
 
