@@ -210,8 +210,12 @@ asset_tools.import_asset_tasks([icon_task])
 icon = eal.load_asset(STONE_DIR + "/Icon_AcclivityStone")
 if icon is None:
     raise RuntimeError("Icon import failed")
-icon.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_UI)
-icon.set_editor_property("never_stream", True)
+# Match the game's own item icons (Satisfactory uses PROJECT01 for them; the UI group came out green in game).
+icon.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_PROJECT01)
+icon.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_DEFAULT)
+icon.set_editor_property("srgb", True)
+icon.set_editor_property("never_stream", False)
+log("Icon settings: group %s, compression %s" % (icon.get_editor_property("lod_group"), icon.get_editor_property("compression_settings")))
 save(icon)
 log("Imported Acclivity Stone icon")
 
