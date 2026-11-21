@@ -62,3 +62,13 @@ def build_gem():
         m.tri(table[k - 1], girdle[k], table[k], inside)
         m.tri(table_centre, table[k - 1], table[k], inside)  # table
     return m
+
+
+BELT_SCALE = 2.0  # the first versions (about 30 cm) looked small next to the game's ores
+
+
+def scaled(mesh, factor=BELT_SCALE):
+    """Uniformly scales a mesh about the origin (normals are unchanged by uniform scaling)."""
+    out = Mesh()
+    out.tris = [(tuple((p[0] * factor, p[1] * factor, p[2] * factor) for p in pts), ns) for pts, ns in mesh.tris]
+    return out

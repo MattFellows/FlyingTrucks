@@ -845,9 +845,9 @@ def import_item_mesh(mesh, name, material):
     return sm
 
 
-stone_mesh = import_item_mesh(item_meshes.build_stone(), "SM_AcclivityStone",
+stone_mesh = import_item_mesh(item_meshes.scaled(item_meshes.build_stone()), "SM_AcclivityStone",
                               make_crystal_instance("MI_AcclivityStone", unreal.LinearColor(0.05, 0.3, 1.0, 1.0), 0.8))
-gem_mesh = import_item_mesh(item_meshes.build_gem(), "SM_RefinedAcclivityStone",
+gem_mesh = import_item_mesh(item_meshes.scaled(item_meshes.build_gem()), "SM_RefinedAcclivityStone",
                             make_crystal_instance("MI_RefinedAcclivityStone", unreal.LinearColor(0.25, 0.6, 1.0, 1.0), 2.5))
 cdo_of(bp_stone).set_editor_property("m_conveyor_mesh", stone_mesh)
 save(bp_stone)
