@@ -219,7 +219,7 @@ public:
 	bool bFlightRing = true;
 
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
-	TSoftObjectPtr< UStaticMesh > RingMesh = TSoftObjectPtr< UStaticMesh >( FSoftObjectPath( TEXT( "/FlyingTrucks/Ring/SM_FlyingRing.SM_FlyingRing" ) ) );
+	TSoftObjectPtr< UStaticMesh > RingMesh = TSoftObjectPtr< UStaticMesh >( FSoftObjectPath( TEXT( "/Skyward/Ring/SM_FlyingRing.SM_FlyingRing" ) ) );
 
 	/** Outer size of the ring, cm (the truck is roughly 3.5-4 m wide). */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
@@ -254,7 +254,7 @@ public:
 
 	/** Triangle with its pivot (front point) at the mesh origin, extending backwards and to one side. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
-	TSoftObjectPtr< UStaticMesh > WingMesh = TSoftObjectPtr< UStaticMesh >( FSoftObjectPath( TEXT( "/FlyingTrucks/Wings/SM_FlyingWing.SM_FlyingWing" ) ) );
+	TSoftObjectPtr< UStaticMesh > WingMesh = TSoftObjectPtr< UStaticMesh >( FSoftObjectPath( TEXT( "/Skyward/Wings/SM_FlyingWing.SM_FlyingWing" ) ) );
 
 	/** Right wing's pivot (its front point), truck-local cm; the left wing mirrors it. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
@@ -344,7 +344,7 @@ public:
 
 	/** Item that must be in the vehicle's cargo or the driver's inventory to fly (Acclivity Stone). Empty = no fuel needed. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Fuel" )
-	TSoftClassPtr< UObject > FlightFuelItem = TSoftClassPtr< UObject >( FSoftObjectPath( TEXT( "/FlyingTrucks/Resources/Desc_AcclivityStone.Desc_AcclivityStone_C" ) ) );
+	TSoftClassPtr< UObject > FlightFuelItem = TSoftClassPtr< UObject >( FSoftObjectPath( TEXT( "/Skyward/Resources/Desc_AcclivityStone.Desc_AcclivityStone_C" ) ) );
 
 	/** Seconds of flight per stone. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Fuel" )

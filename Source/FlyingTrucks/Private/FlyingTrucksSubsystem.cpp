@@ -19,12 +19,12 @@ AFlyingTrucksSubsystem::AFlyingTrucksSubsystem()
 {
 	// Replicated so clients get BeginPlay too (for the node glows); the server does the real work.
 	ReplicationPolicy = ESubsystemReplicationPolicy::SpawnOnServer_Replicate;
-	AutoGrantSchematics.Add( TSoftClassPtr< UFGSchematic >( FSoftObjectPath( TEXT( "/FlyingTrucks/Schematic_FlyingTruck.Schematic_FlyingTruck_C" ) ) ) );
-	AutoGrantSchematics.Add( TSoftClassPtr< UFGSchematic >( FSoftObjectPath( TEXT( "/FlyingTrucks/Schematic_AcclivityStone.Schematic_AcclivityStone_C" ) ) ) );
-	AutoGrantSchematics.Add( TSoftClassPtr< UFGSchematic >( FSoftObjectPath( TEXT( "/FlyingTrucks/Schematic_FlyingVehicles.Schematic_FlyingVehicles_C" ) ) ) );
-	AutoGrantSchematics.Add( TSoftClassPtr< UFGSchematic >( FSoftObjectPath( TEXT( "/FlyingTrucks/MBot/Schematic_MBot.Schematic_MBot_C" ) ) ) );
-	AutoGrantSchematics.Add( TSoftClassPtr< UFGSchematic >( FSoftObjectPath( TEXT( "/FlyingTrucks/Resources/Schematic_RefinedAcclivityStone.Schematic_RefinedAcclivityStone_C" ) ) ) );
-	AcclivityResource = TSoftClassPtr< UObject >( FSoftObjectPath( TEXT( "/FlyingTrucks/Resources/Desc_AcclivityStone.Desc_AcclivityStone_C" ) ) );
+	AutoGrantSchematics.Add( TSoftClassPtr< UFGSchematic >( FSoftObjectPath( TEXT( "/Skyward/Schematic_FlyingTruck.Schematic_FlyingTruck_C" ) ) ) );
+	AutoGrantSchematics.Add( TSoftClassPtr< UFGSchematic >( FSoftObjectPath( TEXT( "/Skyward/Schematic_AcclivityStone.Schematic_AcclivityStone_C" ) ) ) );
+	AutoGrantSchematics.Add( TSoftClassPtr< UFGSchematic >( FSoftObjectPath( TEXT( "/Skyward/Schematic_FlyingVehicles.Schematic_FlyingVehicles_C" ) ) ) );
+	AutoGrantSchematics.Add( TSoftClassPtr< UFGSchematic >( FSoftObjectPath( TEXT( "/Skyward/MBot/Schematic_MBot.Schematic_MBot_C" ) ) ) );
+	AutoGrantSchematics.Add( TSoftClassPtr< UFGSchematic >( FSoftObjectPath( TEXT( "/Skyward/Resources/Schematic_RefinedAcclivityStone.Schematic_RefinedAcclivityStone_C" ) ) ) );
+	AcclivityResource = TSoftClassPtr< UObject >( FSoftObjectPath( TEXT( "/Skyward/Resources/Desc_AcclivityStone.Desc_AcclivityStone_C" ) ) );
 	ConvertibleResourceClassNames = { TEXT( "Desc_OreIron_C" ), TEXT( "Desc_Stone_C" ) };
 }
 

@@ -1,17 +1,17 @@
 """
-Creates (or updates) the FlyingTrucks content assets in /FlyingTrucks/.
+Creates (or updates) the Skyward mod's content assets in /Skyward/ (the plugin was called FlyingTrucks before).
 
 Run headless from PowerShell:
   & 'C:\\Program Files\\Unreal Engine - CSS\\Engine\\Binaries\\Win64\\UnrealEditor-Cmd.exe' `
     'C:\\Modding\\SatisfactoryModLoader\\FactoryGame.uproject' -run=pythonscript `
-    -script='C:\\Modding\\SatisfactoryModLoader\\Mods\\FlyingTrucks\\Scripts\\create_assets.py' `
+    -script='C:\\Modding\\SatisfactoryModLoader\\Mods\\Skyward\\Scripts\\create_assets.py' `
     -unattended -nullrhi -nosplash -stdout
 
 Or in the editor: Tools > Execute Python Script.
 """
 import unreal
 
-ROOT = "/FlyingTrucks"
+ROOT = "/Skyward"
 LOG = "[FlyingTrucks] "
 
 asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
