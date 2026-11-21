@@ -65,8 +65,8 @@ struct FFlyingTruckInput
  *   (read by this component in flight mode, and still passed on to the truck)
  *
  * Multiplayer: flight mode is replicated (so everyone sees the ring/glow). The driver's controls are
- * sent to the server, and the flight forces run on both the server and the driving client so they agree;
- * other players just see the replicated truck.
+ * sent to the server and replicated on to the other players, and the flight forces run on every machine
+ * (server, driver, onlookers) so each copy of the truck flies the same way between network corrections.
  */
 UCLASS( ClassGroup = ( FlyingTrucks ), meta = ( BlueprintSpawnableComponent ) )
 class FLYINGTRUCKS_API UFlyingTruckComponent : public UActorComponent
@@ -264,6 +264,10 @@ private:
 
 	/** Server only: latest controls received from a remote driver. */
 	FFlyingTruckInput RemoteInput;
+
+	/** The driver's controls as seen by everyone except the driver (set by the server). */
+	UPROPERTY( Transient, Replicated )
+	FFlyingTruckInput ReplicatedInput;
 
 	/** Driving client only: what was last sent to the server, and when. */
 	FFlyingTruckInput LastSentInput;

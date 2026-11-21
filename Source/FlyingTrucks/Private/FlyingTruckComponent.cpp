@@ -35,6 +35,8 @@ void UFlyingTruckComponent::GetLifetimeReplicatedProps( TArray< FLifetimePropert
 {
 	Super::GetLifetimeReplicatedProps( OutLifetimeProps );
 	DOREPLIFETIME( UFlyingTruckComponent, bIsFlying );
+	// The driver uses its own live input, so skip sending it back to them.
+	DOREPLIFETIME_CONDITION( UFlyingTruckComponent, ReplicatedInput, COND_SkipOwner );
 }
 
 void UFlyingTruckComponent::BeginPlay()
@@ -287,6 +289,10 @@ void UFlyingTruckComponent::SetFlying( bool bNewFlying )
 
 void UFlyingTruckComponent::ApplyFlightModeLocally()
 {
+	if( !bIsFlying && GetOwner()->HasAuthority() )
+	{
+		ReplicatedInput = FFlyingTruckInput();
+	}
 	UpdateFlightContext();
 	UpdateGlow();
 	UE_LOG( LogFlyingTrucks, Log, TEXT( "%s: flight mode %s (%s)." ), *GetOwner()->GetName(), bIsFlying ? TEXT( "ON" ) : TEXT( "OFF" ),
@@ -357,11 +363,17 @@ void UFlyingTruckComponent::TickComponent( float DeltaTime, ELevelTick TickType,
 	{
 		SendInputToServer( DeltaTime );
 	}
-	// Forces run on the server and on the driving client; other players just see the replicated truck.
-	if( !BoundController && !bAuthority )
+	if( bAuthority )
 	{
-		return;
+		// Share the driver's controls with onlookers so their copy of the truck flies the same way.
+		const FFlyingTruckInput Current = BoundController ? GatherLocalInput() : RemoteInput;
+		if( !Current.IsNearlyEqual( ReplicatedInput, 0.01f ) )
+		{
+			ReplicatedInput = Current;
+		}
 	}
+	// Forces run on every machine: without them an onlooker's copy only has gravity between
+	// network updates, sags, and gets yanked back (the "janky" look).
 
 	UPrimitiveComponent* Body = Cast< UPrimitiveComponent >( GetOwner()->GetRootComponent() );
 	if( !Body || !Body->IsSimulatingPhysics() )
@@ -394,7 +406,8 @@ void UFlyingTruckComponent::ApplyFlightForces( UPrimitiveComponent* Body, float 
 
 	// Local driver: our own flight-mode bindings (the game's vehicle input freezes while airborne).
 	// Server with a remote driver: the controls that driver sent us.
-	const FFlyingTruckInput In = BoundController ? GatherLocalInput() : RemoteInput;
+	// Onlookers: the driver's controls as replicated by the server.
+	const FFlyingTruckInput In = BoundController ? GatherLocalInput() : ( GetOwner()->HasAuthority() ? RemoteInput : ReplicatedInput );
 	const float Throttle = In.Throttle;
 	const float Brake = In.Brake;
 	const float Steer = In.Steer;
