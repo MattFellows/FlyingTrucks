@@ -1020,7 +1020,7 @@ void UFlyingTruckComponent::UpdateWings( float DeltaTime )
 
 void UFlyingTruckComponent::UpdateRing( float DeltaTime )
 {
-	if( !RingComponent )
+	if( !RingComponent && FlightGlowParts.Num() == 0 )
 	{
 		return;
 	}
@@ -1034,6 +1034,23 @@ void UFlyingTruckComponent::UpdateRing( float DeltaTime )
 	{
 		const float Step = DeltaTime / FMath::Max( RingFadeSeconds, 0.01f );
 		RingGlowAlpha = Target > RingGlowAlpha ? FMath::Min( RingGlowAlpha + Step, Target ) : FMath::Max( RingGlowAlpha - Step, Target );
+	}
+	if( RingGlowAlpha != Previous )
+	{
+		const float A = FMath::SmoothStep( 0.f, 1.f, RingGlowAlpha );
+		for( const TPair< int32, TWeakObjectPtr< UMaterialInstanceDynamic > >& Glow : FlightGlowParts )
+		{
+			if( UMaterialInstanceDynamic* MID = Glow.Value.Get() )
+			{
+				const FFlyingBodyPart& Part = BodyParts[ Glow.Key ];
+				MID->SetVectorParameterValue( TEXT( "Color" ), FMath::Lerp( Part.IdleColor, Part.Color, A ) );
+				MID->SetScalarParameterValue( TEXT( "Intensity" ), FMath::Lerp( 1.f, Part.GlowIntensity, A ) );
+			}
+		}
+	}
+	if( !RingComponent )
+	{
+		return;
 	}
 	if( RingGlowAlpha > 0.f )
 	{
@@ -1148,6 +1165,11 @@ void UFlyingTruckComponent::CreateBodyParts()
 			if( Part.GlowIntensity > 0.f )
 			{
 				MID->SetScalarParameterValue( TEXT( "Intensity" ), Part.GlowIntensity );
+			}
+			if( Part.bGlowOnlyInFlight )
+			{
+				FlightGlowParts.Emplace( i, MID );
+				RingGlowAlpha = -1.f; // force UpdateRing to set the starting colour
 			}
 		}
 		Comp->RegisterComponent();

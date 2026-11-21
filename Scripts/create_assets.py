@@ -585,6 +585,9 @@ for part, mat, color, glow in (("Hull", hull_mat, unreal.LinearColor(0.02, 0.02,
     bp_part.set_editor_property("scale", unreal.Vector(MBOT_SCALE, MBOT_SCALE, MBOT_SCALE))
     bp_part.set_editor_property("color", color)
     bp_part.set_editor_property("glow_intensity", glow)
+    if part == "Engine":
+        bp_part.set_editor_property("glow_only_in_flight", True)
+        bp_part.set_editor_property("idle_color", unreal.LinearColor(0.03, 0.03, 0.035, 1.0))
     parts.append(bp_part)
 
 mbot_desc_text = ("A sleek black starfighter that hovers on its acclivity ring. Press F (Y on gamepad) to lift off; "

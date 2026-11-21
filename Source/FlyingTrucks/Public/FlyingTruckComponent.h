@@ -78,6 +78,13 @@ struct FFlyingBodyPart
 	/** > 0: sets the material's "Intensity" parameter (for glowing parts). */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Body" )
 	float GlowIntensity = 0.f;
+
+	/** Glowing part that only lights up in flight (fades with the ring); IdleColor when not flying. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Body" )
+	bool bGlowOnlyInFlight = false;
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Body" )
+	FLinearColor IdleColor = FLinearColor( 0.03f, 0.03f, 0.035f );
 };
 
 /**
@@ -504,6 +511,9 @@ private:
 	TArray< TObjectPtr< UStaticMeshComponent > > BodyPartComponents;
 
 	FTimerHandle HideMeshTimer;
+
+	/** Materials of body parts that glow only in flight, with the part they belong to. */
+	TArray< TPair< int32, TWeakObjectPtr< UMaterialInstanceDynamic > > > FlightGlowParts;
 
 	TWeakObjectPtr< AActor > HiddenDriver;
 	TArray< TWeakObjectPtr< UMeshComponent > > HiddenDriverMeshes;
