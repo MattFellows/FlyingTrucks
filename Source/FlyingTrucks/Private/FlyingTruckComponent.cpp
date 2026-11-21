@@ -819,7 +819,7 @@ void UFlyingTruckComponent::CreateRing()
 
 void UFlyingTruckComponent::CreateWings()
 {
-	if( !bFlightWings || GetNetMode() == NM_DedicatedServer || RightWing )
+	if( !bFlightWings || GetNetMode() == NM_DedicatedServer || WingPlates.Num() > 0 )
 	{
 		return;
 	}
@@ -836,34 +836,39 @@ void UFlyingTruckComponent::CreateWings()
 	const FBoxSphereBounds Bounds = Mesh->GetBounds();
 	const float SignX = Bounds.Origin.X <= 0.f ? 1.f : -1.f;
 	const float SignY = Bounds.Origin.Y >= 0.f ? 1.f : -1.f;
-	const float Chord = Bounds.BoxExtent.X * 2.f;
-	const float Span = Bounds.BoxExtent.Y * 2.f;
+	const float Chord = Bounds.BoxExtent.X * 2.f * WingScale;
+	const float Span = Bounds.BoxExtent.Y * 2.f * WingScale;
+	WingPlateThickness = Bounds.BoxExtent.Z * 2.f * WingScale;
 	// Folding swings the tip in until the leading edge lies along the truck, plus a little extra.
 	WingFoldYaw = FMath::RadiansToDegrees( FMath::Atan2( Span, FMath::Max( Chord, 1.f ) ) ) + WingExtraFoldDegrees;
+	WingLeadingEdgeLength = FMath::Sqrt( Chord * Chord + Span * Span );
+	WingLeadingEdgeDir = FVector( -Chord, Span, 0.f ).GetSafeNormal();
 
-	auto MakeWing = [&]( const TCHAR* Name, float Side ) -> UStaticMeshComponent*
+	const int32 Plates = FMath::Clamp( WingPlateCount, 1, 6 );
+	for( float Side : { 1.f, -1.f } )
 	{
-		UStaticMeshComponent* Wing = NewObject< UStaticMeshComponent >( GetOwner(), Name );
-		Wing->SetupAttachment( Root );
-		Wing->SetStaticMesh( Mesh );
-		Wing->SetCollisionEnabled( ECollisionEnabled::NoCollision );
-		Wing->SetCanEverAffectNavigation( false );
-		Wing->SetRelativeLocation( FVector( WingPivot.X, WingPivot.Y * Side, WingPivot.Z ) );
-		Wing->SetRelativeScale3D( FVector( SignX, SignY * Side, 1.f ) * WingScale );
-		if( UMaterialInstanceDynamic* MID = Wing->CreateDynamicMaterialInstance( 0 ) )
+		for( int32 Index = 0; Index < Plates; ++Index )
 		{
-			MID->SetVectorParameterValue( TEXT( "Color" ), WingColor );
+			const FName Name( *FString::Printf( TEXT( "FlyingTruckWing%s%d" ), Side > 0.f ? TEXT( "R" ) : TEXT( "L" ), Index ) );
+			UStaticMeshComponent* Plate = NewObject< UStaticMeshComponent >( GetOwner(), Name );
+			Plate->SetupAttachment( Root );
+			Plate->SetStaticMesh( Mesh );
+			Plate->SetCollisionEnabled( ECollisionEnabled::NoCollision );
+			Plate->SetCanEverAffectNavigation( false );
+			Plate->SetRelativeScale3D( FVector( SignX, SignY * Side, 1.f ) * WingScale );
+			if( UMaterialInstanceDynamic* MID = Plate->CreateDynamicMaterialInstance( 0 ) )
+			{
+				MID->SetVectorParameterValue( TEXT( "Color" ), WingColor );
+			}
+			Plate->RegisterComponent();
+			WingPlates.Add( Plate );
 		}
-		Wing->RegisterComponent();
-		return Wing;
-	};
-	RightWing = MakeWing( TEXT( "FlyingTruckWingRight" ), 1.f );
-	LeftWing = MakeWing( TEXT( "FlyingTruckWingLeft" ), -1.f );
+	}
 }
 
 void UFlyingTruckComponent::UpdateWings( float DeltaTime )
 {
-	if( !RightWing || !LeftWing )
+	if( WingPlates.Num() == 0 )
 	{
 		return;
 	}
@@ -877,12 +882,29 @@ void UFlyingTruckComponent::UpdateWings( float DeltaTime )
 		const float Step = DeltaTime / FMath::Max( WingDeploySeconds, 0.01f );
 		WingDeployAlpha = Target > WingDeployAlpha ? FMath::Min( WingDeployAlpha + Step, Target ) : FMath::Max( WingDeployAlpha - Step, Target );
 	}
-	// Ease in and out; yaw swings the tip forward/outwards about the front point.
-	const float Eased = FMath::SmoothStep( 0.f, 1.f, WingDeployAlpha );
-	const float Yaw = WingFoldYaw * ( 1.f - Eased );
-	// Right wing extends to +Y; folding it inwards turns its tip towards -Y, which is a positive yaw.
-	RightWing->SetRelativeRotation( FRotator( 0.f, Yaw, 0.f ) );
-	LeftWing->SetRelativeRotation( FRotator( 0.f, -Yaw, 0.f ) );
+	// First half: the stacked plates swing out about the front point. Second half: they telescope
+	// out along the leading edge. Folding plays it backwards.
+	const float Swing = FMath::SmoothStep( 0.f, 0.5f, WingDeployAlpha );
+	const float Slide = FMath::SmoothStep( 0.5f, 1.f, WingDeployAlpha );
+	const float Yaw = WingFoldYaw * ( 1.f - Swing );
+	const int32 PlatesPerSide = WingPlates.Num() / 2;
+
+	for( int32 i = 0; i < WingPlates.Num(); ++i )
+	{
+		UStaticMeshComponent* Plate = WingPlates[ i ];
+		if( !Plate )
+		{
+			continue;
+		}
+		const float Side = i < PlatesPerSide ? 1.f : -1.f;
+		const int32 Index = i % PlatesPerSide;
+		// Right wing extends to +Y; folding it inwards turns its tip towards -Y, which is a positive yaw.
+		const FRotator Rot( 0.f, Yaw * Side, 0.f );
+		const FVector SlideLocal = FVector( WingLeadingEdgeDir.X, WingLeadingEdgeDir.Y * Side, 0.f ) * ( WingLeadingEdgeLength * WingPlateSlideFraction * Index * Slide );
+		// Each further plate sits just under the previous one so they nest when stacked.
+		const FVector Pivot( WingPivot.X, WingPivot.Y * Side, WingPivot.Z - Index * WingPlateThickness * 1.05f );
+		Plate->SetRelativeLocationAndRotation( Pivot + Rot.RotateVector( SlideLocal ), Rot );
+	}
 }
 
 #undef LOCTEXT_NAMESPACE

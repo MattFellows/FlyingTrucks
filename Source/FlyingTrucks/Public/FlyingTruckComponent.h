@@ -209,11 +209,19 @@ public:
 
 	/** Right wing's pivot (its front point), truck-local cm; the left wing mirrors it. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
-	FVector WingPivot = FVector( 120.f, 130.f, 260.f );
+	FVector WingPivot = FVector( 120.f, 130.f, 300.f );
 
-	/** Size multiplier for the wing mesh (1 = 3.2 m long, 2.3 m out to the side). */
+	/** Size of each wing plate (1 = 3.2 m long, 2.3 m out to the side). Plates must fit inside the body when folded. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
-	float WingScale = 1.56f;
+	float WingScale = 1.4f;
+
+	/** Telescoping: each wing is this many stacked plates that slide out along the leading edge. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
+	int32 WingPlateCount = 3;
+
+	/** How far each further plate slides out, as a fraction of the plate's leading edge. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
+	float WingPlateSlideFraction = 0.25f;
 
 	/** Extra inward swing when folded, degrees, so the tip ends up well inside the body. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
@@ -221,7 +229,7 @@ public:
 
 	/** Time to fully extend or fold, seconds. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
-	float WingDeploySeconds = 0.8f;
+	float WingDeploySeconds = 1.2f;
 
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
 	FLinearColor WingColor = FLinearColor( 0.035f, 0.035f, 0.04f );
@@ -365,11 +373,14 @@ private:
 	UPROPERTY( Transient )
 	TObjectPtr< UStaticMeshComponent > RingComponent;
 
+	/** Wing plates: right wing's plates first, then the left wing's. */
 	UPROPERTY( Transient )
-	TObjectPtr< UStaticMeshComponent > LeftWing;
+	TArray< TObjectPtr< UStaticMeshComponent > > WingPlates;
 
-	UPROPERTY( Transient )
-	TObjectPtr< UStaticMeshComponent > RightWing;
+	/** Leading-edge direction (front point to tip) of the extended right wing, truck-local, unit length. */
+	FVector WingLeadingEdgeDir = FVector::ZeroVector;
+	float WingLeadingEdgeLength = 0.f;
+	float WingPlateThickness = 0.f;
 
 	/** 0 = folded into the body, 1 = fully out. */
 	float WingDeployAlpha = 0.f;
