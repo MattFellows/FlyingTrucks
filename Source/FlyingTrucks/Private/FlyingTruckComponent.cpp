@@ -849,7 +849,7 @@ void UFlyingTruckComponent::CreateWings()
 		Wing->SetCollisionEnabled( ECollisionEnabled::NoCollision );
 		Wing->SetCanEverAffectNavigation( false );
 		Wing->SetRelativeLocation( FVector( WingPivot.X, WingPivot.Y * Side, WingPivot.Z ) );
-		Wing->SetRelativeScale3D( FVector( SignX, SignY * Side, 1.f ) );
+		Wing->SetRelativeScale3D( FVector( SignX, SignY * Side, 1.f ) * WingScale );
 		if( UMaterialInstanceDynamic* MID = Wing->CreateDynamicMaterialInstance( 0 ) )
 		{
 			MID->SetVectorParameterValue( TEXT( "Color" ), WingColor );

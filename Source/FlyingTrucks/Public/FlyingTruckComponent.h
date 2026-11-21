@@ -209,7 +209,11 @@ public:
 
 	/** Right wing's pivot (its front point), truck-local cm; the left wing mirrors it. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
-	FVector WingPivot = FVector( 150.f, 130.f, 110.f );
+	FVector WingPivot = FVector( 120.f, 130.f, 210.f );
+
+	/** Size multiplier for the wing mesh (1 = 3.2 m long, 2.3 m out to the side). */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
+	float WingScale = 1.3f;
 
 	/** Extra inward swing when folded, degrees, so the tip ends up well inside the body. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
