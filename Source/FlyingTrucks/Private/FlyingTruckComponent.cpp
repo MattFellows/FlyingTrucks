@@ -10,6 +10,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Net/UnrealNetwork.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "EnhancedInputComponent.h"
@@ -27,6 +28,13 @@ UFlyingTruckComponent::UFlyingTruckComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = true;
 	PrimaryComponentTick.TickGroup = TG_PrePhysics;
+	SetIsReplicatedByDefault( true );
+}
+
+void UFlyingTruckComponent::GetLifetimeReplicatedProps( TArray< FLifetimeProperty >& OutLifetimeProps ) const
+{
+	Super::GetLifetimeReplicatedProps( OutLifetimeProps );
+	DOREPLIFETIME( UFlyingTruckComponent, bIsFlying );
 }
 
 void UFlyingTruckComponent::BeginPlay()
@@ -55,6 +63,8 @@ void UFlyingTruckComponent::BeginPlay()
 
 	CreateGlowLights();
 	CreateRing();
+	// A late-joining client may already have bIsFlying = true replicated before BeginPlay.
+	UpdateGlow();
 
 	if( bApplyDefaultPaint && GetOwner()->HasAuthority() )
 	{
@@ -87,7 +97,11 @@ void UFlyingTruckComponent::HandleControllerChanged( APawn* Pawn, AController* O
 	else
 	{
 		// Driver left: stop flying (the truck will glide/fall).
-		SetFlying( false );
+		RemoteInput = FFlyingTruckInput();
+		if( GetOwner()->HasAuthority() )
+		{
+			SetFlying( false );
+		}
 	}
 }
 
@@ -262,11 +276,66 @@ void UFlyingTruckComponent::SetFlying( bool bNewFlying )
 	{
 		return;
 	}
+	// Apply immediately here (no lag for the driver); the server's value then replicates to everyone.
 	bIsFlying = bNewFlying;
+	ApplyFlightModeLocally();
+	if( !GetOwner()->HasAuthority() )
+	{
+		Server_SetFlying( bNewFlying );
+	}
+}
+
+void UFlyingTruckComponent::ApplyFlightModeLocally()
+{
 	UpdateFlightContext();
 	UpdateGlow();
-	UE_LOG( LogFlyingTrucks, Log, TEXT( "%s: flight mode %s." ), *GetOwner()->GetName(), bIsFlying ? TEXT( "ON" ) : TEXT( "OFF" ) );
+	UE_LOG( LogFlyingTrucks, Log, TEXT( "%s: flight mode %s (%s)." ), *GetOwner()->GetName(), bIsFlying ? TEXT( "ON" ) : TEXT( "OFF" ),
+		GetOwner()->HasAuthority() ? TEXT( "server" ) : TEXT( "client" ) );
 	OnFlightModeChanged.Broadcast( bIsFlying );
+}
+
+void UFlyingTruckComponent::OnRep_IsFlying()
+{
+	ApplyFlightModeLocally();
+}
+
+void UFlyingTruckComponent::Server_SetFlying_Implementation( bool bNewFlying )
+{
+	SetFlying( bNewFlying );
+}
+
+void UFlyingTruckComponent::Server_SetFlightInput_Implementation( FFlyingTruckInput NewInput )
+{
+	NewInput.Throttle = FMath::Clamp( NewInput.Throttle, 0.f, 1.f );
+	NewInput.Brake = FMath::Clamp( NewInput.Brake, 0.f, 1.f );
+	NewInput.Steer = FMath::Clamp( NewInput.Steer, -1.f, 1.f );
+	NewInput.Pitch = FMath::Clamp( NewInput.Pitch, -1.f, 1.f );
+	RemoteInput = NewInput;
+}
+
+FFlyingTruckInput UFlyingTruckComponent::GatherLocalInput() const
+{
+	FFlyingTruckInput In;
+	In.Throttle = ThrottleInput;
+	In.Brake = BrakeInput;
+	In.Steer = FMath::Clamp( SteerRightInput - SteerLeftInput + SteerAxisInput, -1.f, 1.f );
+	In.Pitch = ( bPitchUpHeld ? 1.f : 0.f ) - ( bPitchDownHeld ? 1.f : 0.f );
+	return In;
+}
+
+void UFlyingTruckComponent::SendInputToServer( float DeltaTime )
+{
+	// Send on change (at most 30/s) plus a 5/s heartbeat, since these RPCs are unreliable.
+	const double Now = GetWorld()->GetTimeSeconds();
+	const FFlyingTruckInput Current = GatherLocalInput();
+	const double SinceLast = Now - LastInputSendTime;
+	const bool bChanged = !Current.IsNearlyEqual( LastSentInput );
+	if( ( bChanged && SinceLast >= 1.0 / 30.0 ) || SinceLast >= 0.2 )
+	{
+		Server_SetFlightInput( Current );
+		LastSentInput = Current;
+		LastInputSendTime = Now;
+	}
 }
 
 void UFlyingTruckComponent::TickComponent( float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction )
@@ -281,6 +350,17 @@ void UFlyingTruckComponent::TickComponent( float DeltaTime, ELevelTick TickType,
 	if( RingComponent )
 	{
 		RingComponent->AddLocalRotation( FRotator( 0.f, RingSpinDegreesPerSecond * DeltaTime, 0.f ) );
+	}
+
+	const bool bAuthority = GetOwner()->HasAuthority();
+	if( BoundController && !bAuthority )
+	{
+		SendInputToServer( DeltaTime );
+	}
+	// Forces run on the server and on the driving client; other players just see the replicated truck.
+	if( !BoundController && !bAuthority )
+	{
+		return;
 	}
 
 	UPrimitiveComponent* Body = Cast< UPrimitiveComponent >( GetOwner()->GetRootComponent() );
@@ -312,21 +392,13 @@ void UFlyingTruckComponent::ApplyFlightForces( UPrimitiveComponent* Body, float 
 	const float FwdSpeed = FVector::DotProduct( Velocity, Fwd );
 	const bool bAirborne = IsAirborne( Body );
 
-	float Throttle = 0.f, Brake = 0.f, Steer = 0.f;
-	if( BoundController )
-	{
-		// Our own flight-mode bindings: the game's vehicle input freezes while airborne.
-		Throttle = ThrottleInput;
-		Brake = BrakeInput;
-		Steer = FMath::Clamp( SteerRightInput - SteerLeftInput + SteerAxisInput, -1.f, 1.f );
-	}
-	else if( VehicleMovement )
-	{
-		Throttle = VehicleMovement->GetThrottleInput();
-		Brake = VehicleMovement->GetBrakeInput();
-		Steer = VehicleMovement->GetSteeringInput();
-	}
-	const float Pitch = ( bPitchUpHeld ? 1.f : 0.f ) - ( bPitchDownHeld ? 1.f : 0.f );
+	// Local driver: our own flight-mode bindings (the game's vehicle input freezes while airborne).
+	// Server with a remote driver: the controls that driver sent us.
+	const FFlyingTruckInput In = BoundController ? GatherLocalInput() : RemoteInput;
+	const float Throttle = In.Throttle;
+	const float Brake = In.Brake;
+	const float Steer = In.Steer;
+	const float Pitch = In.Pitch;
 
 	// ---- Linear: thrust, lift, drag, slip alignment (all as accelerations, mass-independent) ----
 	const float Gravity = FMath::Abs( GetWorld()->GetGravityZ() );

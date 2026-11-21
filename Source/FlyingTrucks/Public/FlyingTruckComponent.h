@@ -23,6 +23,33 @@ struct FInputActionValue;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam( FOnFlightModeChanged, bool, bIsFlying );
 
+/** The driver's flight controls, sent from the driving client to the server. */
+USTRUCT()
+struct FFlyingTruckInput
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	float Throttle = 0.f;
+
+	UPROPERTY()
+	float Brake = 0.f;
+
+	/** -1 = left, +1 = right. */
+	UPROPERTY()
+	float Steer = 0.f;
+
+	/** -1 = nose down, +1 = nose up. */
+	UPROPERTY()
+	float Pitch = 0.f;
+
+	bool IsNearlyEqual( const FFlyingTruckInput& Other, float Tolerance = 0.05f ) const
+	{
+		return FMath::IsNearlyEqual( Throttle, Other.Throttle, Tolerance ) && FMath::IsNearlyEqual( Brake, Other.Brake, Tolerance )
+			&& FMath::IsNearlyEqual( Steer, Other.Steer, Tolerance ) && FMath::IsNearlyEqual( Pitch, Other.Pitch, Tolerance );
+	}
+};
+
 /**
  * Add to a wheeled vehicle Blueprint (BP_FlyingTruck) to let the driver fly it like a plane.
  *
@@ -37,7 +64,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam( FOnFlightModeChanged, bool, bIsFlyi
  *   A, D / Left stick        bank and turn
  *   (read by this component in flight mode, and still passed on to the truck)
  *
- * Single-player first: forces are applied on the machine controlling the vehicle.
+ * Multiplayer: flight mode is replicated (so everyone sees the ring/glow). The driver's controls are
+ * sent to the server, and the flight forces run on both the server and the driving client so they agree;
+ * other players just see the replicated truck.
  */
 UCLASS( ClassGroup = ( FlyingTrucks ), meta = ( BlueprintSpawnableComponent ) )
 class FLYINGTRUCKS_API UFlyingTruckComponent : public UActorComponent
@@ -50,6 +79,7 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay( const EEndPlayReason::Type EndPlayReason ) override;
 	virtual void TickComponent( float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction ) override;
+	virtual void GetLifetimeReplicatedProps( TArray< FLifetimeProperty >& OutLifetimeProps ) const override;
 
 	UFUNCTION( BlueprintPure, Category = "Flight" )
 	bool IsFlying() const { return bIsFlying; }
@@ -212,9 +242,32 @@ protected:
 	void ApplyDefaultPaint();
 	void ApplyFlightForces( UPrimitiveComponent* Body, float DeltaTime );
 
+	// ---- Multiplayer ----
+	UFUNCTION()
+	void OnRep_IsFlying();
+
+	/** Local effects of a flight-mode change (input context, glow/ring, log, event). */
+	void ApplyFlightModeLocally();
+
+	UFUNCTION( Server, Reliable )
+	void Server_SetFlying( bool bNewFlying );
+
+	UFUNCTION( Server, Unreliable )
+	void Server_SetFlightInput( FFlyingTruckInput NewInput );
+
+	FFlyingTruckInput GatherLocalInput() const;
+	void SendInputToServer( float DeltaTime );
+
 private:
-	UPROPERTY( Transient )
+	UPROPERTY( Transient, ReplicatedUsing = OnRep_IsFlying )
 	bool bIsFlying = false;
+
+	/** Server only: latest controls received from a remote driver. */
+	FFlyingTruckInput RemoteInput;
+
+	/** Driving client only: what was last sent to the server, and when. */
+	FFlyingTruckInput LastSentInput;
+	double LastInputSendTime = -1000.0;
 
 	double LastToggleTime = -1000.0;
 	bool bToggleKeyHeld = false;
