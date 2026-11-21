@@ -50,6 +50,36 @@ struct FFlyingTruckInput
 	}
 };
 
+/** An extra static mesh attached to the vehicle (e.g. M-Bot's hull), set up per vehicle Blueprint. */
+USTRUCT( BlueprintType )
+struct FFlyingBodyPart
+{
+	GENERATED_BODY()
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Body" )
+	TSoftObjectPtr< UStaticMesh > Mesh;
+
+	/** Optional material override; it may have "Color" (and "Intensity") parameters. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Body" )
+	TSoftObjectPtr< class UMaterialInterface > Material;
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Body" )
+	FVector Location = FVector::ZeroVector;
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Body" )
+	FRotator Rotation = FRotator::ZeroRotator;
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Body" )
+	FVector Scale = FVector::OneVector;
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Body" )
+	FLinearColor Color = FLinearColor( 0.02f, 0.02f, 0.025f );
+
+	/** > 0: sets the material's "Intensity" parameter (for glowing parts). */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Body" )
+	float GlowIntensity = 0.f;
+};
+
 /**
  * Add to a wheeled vehicle Blueprint (BP_FlyingTruck) to let the driver fly it like a plane.
  *
@@ -199,6 +229,18 @@ public:
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
 	float RingGlowIntensity = 20.f;
 
+	/** Keep the ring on show when not flying (dark and still); it lights up and spins in flight. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
+	bool bRingAlwaysVisible = true;
+
+	/** The ring's colour when not flying. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
+	FLinearColor RingIdleColor = FLinearColor( 0.03f, 0.03f, 0.035f );
+
+	/** Time for the ring to light up / go dark, seconds. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
+	float RingFadeSeconds = 0.6f;
+
 	/** Delta wings that swing out of the truck's sides in flight mode. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
 	bool bFlightWings = true;
@@ -240,6 +282,43 @@ public:
 	 */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Fit" )
 	bool bScaleToVehicle = true;
+
+	/** Per-vehicle touch-ups applied after fitting (e.g. the Tractor's wings are a bit smaller and lower). */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Fit" )
+	float WingScaleAdjust = 1.f;
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Fit" )
+	FVector WingPivotAdjust = FVector::ZeroVector;
+
+	/** Hide the base vehicle's own meshes (for vehicles that bring their own BodyParts, like M-Bot). */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Body" )
+	bool bHideVehicleMesh = false;
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Body" )
+	TArray< FFlyingBodyPart > BodyParts;
+
+	/**
+	 * Hover (M-Bot): in flight mode, hold height when slow or stopped, level out, and use the pitch
+	 * keys to rise/sink. Above HoverSpeed it flies like the trucks.
+	 */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Hover" )
+	bool bHover = false;
+
+	/** Below this forward speed (cm/s) hover behaviour takes over (blended). */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Hover" )
+	float HoverSpeed = 1200.f;
+
+	/** Vertical acceleration from the pitch keys while hovering, cm/s^2. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Hover" )
+	float HoverClimbAcceleration = 700.f;
+
+	/** How quickly drift dies away when hovering with no throttle, 1/s. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Hover" )
+	float HoverDamping = 1.2f;
+
+	/** How hard it levels itself while hovering, 1/s. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Hover" )
+	float HoverLevelGain = 2.5f;
 
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Fit" )
 	TSoftClassPtr< AActor > ReferenceVehicle = TSoftClassPtr< AActor >( FSoftObjectPath( TEXT( "/Game/FactoryGame/Buildable/Vehicle/Truck/BP_Truck.BP_Truck_C" ) ) );
@@ -300,6 +379,8 @@ protected:
 	void UpdateGlow();
 	void CreateWings();
 	void UpdateWings( float DeltaTime );
+	void UpdateRing( float DeltaTime );
+	void CreateBodyParts();
 
 	/** Sets the custom paint via reflection (avoids depending on FFactoryCustomizationData's C++ layout). */
 	void ApplyDefaultPaint();
@@ -395,6 +476,15 @@ private:
 	FVector WingLeadingEdgeDir = FVector::ZeroVector;
 	float WingLeadingEdgeLength = 0.f;
 	float WingPlateThickness = 0.f;
+
+	UPROPERTY( Transient )
+	TObjectPtr< UMaterialInstanceDynamic > RingMaterial;
+
+	/** 0 = dark, 1 = fully lit. */
+	float RingGlowAlpha = -1.f;
+
+	UPROPERTY( Transient )
+	TArray< TObjectPtr< UStaticMeshComponent > > BodyPartComponents;
 
 	/** 0 = folded into the body, 1 = fully out. */
 	float WingDeployAlpha = 0.f;

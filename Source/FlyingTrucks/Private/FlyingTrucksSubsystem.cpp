@@ -22,6 +22,7 @@ AFlyingTrucksSubsystem::AFlyingTrucksSubsystem()
 	AutoGrantSchematics.Add( TSoftClassPtr< UFGSchematic >( FSoftObjectPath( TEXT( "/FlyingTrucks/Schematic_FlyingTruck.Schematic_FlyingTruck_C" ) ) ) );
 	AutoGrantSchematics.Add( TSoftClassPtr< UFGSchematic >( FSoftObjectPath( TEXT( "/FlyingTrucks/Schematic_AcclivityStone.Schematic_AcclivityStone_C" ) ) ) );
 	AutoGrantSchematics.Add( TSoftClassPtr< UFGSchematic >( FSoftObjectPath( TEXT( "/FlyingTrucks/Schematic_FlyingVehicles.Schematic_FlyingVehicles_C" ) ) ) );
+	AutoGrantSchematics.Add( TSoftClassPtr< UFGSchematic >( FSoftObjectPath( TEXT( "/FlyingTrucks/MBot/Schematic_MBot.Schematic_MBot_C" ) ) ) );
 	AcclivityResource = TSoftClassPtr< UObject >( FSoftObjectPath( TEXT( "/FlyingTrucks/Resources/Desc_AcclivityStone.Desc_AcclivityStone_C" ) ) );
 	ConvertibleResourceClassNames = { TEXT( "Desc_OreIron_C" ), TEXT( "Desc_Stone_C" ) };
 }

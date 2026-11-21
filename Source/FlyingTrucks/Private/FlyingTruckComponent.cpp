@@ -10,6 +10,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
@@ -83,6 +84,9 @@ void UFlyingTruckComponent::BeginPlay()
 	}
 
 	FitToVehicle();
+	WingScale *= WingScaleAdjust;
+	WingPivot += WingPivotAdjust;
+	CreateBodyParts();
 	CreateGlowLights();
 	CreateRing();
 	CreateWings();
@@ -570,15 +574,11 @@ void UFlyingTruckComponent::TickComponent( float DeltaTime, ELevelTick TickType,
 	Super::TickComponent( DeltaTime, TickType, ThisTickFunction );
 
 	UpdateWings( DeltaTime );
+	UpdateRing( DeltaTime );
 
 	if( !bIsFlying || DeltaTime <= 0.f )
 	{
 		return;
-	}
-
-	if( RingComponent )
-	{
-		RingComponent->AddLocalRotation( FRotator( 0.f, RingSpinDegreesPerSecond * DeltaTime, 0.f ) );
 	}
 
 	const bool bAuthority = GetOwner()->HasAuthority();
@@ -648,17 +648,27 @@ void UFlyingTruckComponent::ApplyFlightForces( UPrimitiveComponent* Body, float 
 	// The wheels still drive on the ground; extra thrust in the air keeps you moving.
 	Accel += Fwd * ( Throttle - Brake * ReverseThrustFraction ) * ThrustAcceleration;
 
+	// Hover (M-Bot): 1 when slow, fading to 0 by HoverSpeed.
+	const float HoverBlend = bHover ? 1.f - FMath::Clamp( FMath::Abs( FwdSpeed ) / FMath::Max( HoverSpeed, 1.f ), 0.f, 1.f ) : 0.f;
+
 	// Lift ~ v^2, equals gravity at TakeoffSpeed, along the truck's up axis (so banking turns).
 	const float SpeedRatio = FMath::Max( FwdSpeed, 0.f ) / FMath::Max( TakeoffSpeed, 1.f );
-	Accel += Up * FMath::Min( SpeedRatio * SpeedRatio, MaxLiftG ) * Gravity;
+	Accel += Up * FMath::Min( SpeedRatio * SpeedRatio, MaxLiftG ) * Gravity * ( 1.f - HoverBlend );
+	if( HoverBlend > 0.f )
+	{
+		// Hold height against gravity, rise/sink on the pitch keys, and let drift die away.
+		Accel += FVector::UpVector * ( Gravity + Pitch * HoverClimbAcceleration ) * HoverBlend;
+		Accel -= Velocity * HoverDamping * HoverBlend * ( 1.f - Throttle );
+	}
 
 	if( bAirborne )
 	{
 		Accel -= Velocity * LinearDrag;
-		// Bleed off sideways and vertical slip so the truck flies where it points.
+		// Bleed off sideways and vertical slip so the truck flies where it points (not while hovering).
+		const float Align = FMath::Min( VelocityAlignment, 1.f / DeltaTime ) * ( 1.f - HoverBlend );
 		const FVector Slip = Right * FVector::DotProduct( Velocity, Right ) + Up * FVector::DotProduct( Velocity, Up );
-		Accel -= Slip * FMath::Min( VelocityAlignment, 1.f / DeltaTime );
-		Accel += Fwd * Slip.Size() * FMath::Min( VelocityAlignment, 1.f / DeltaTime ) * 0.5f;
+		Accel -= Slip * Align;
+		Accel += Fwd * Slip.Size() * Align * 0.5f;
 	}
 
 	Body->AddForce( Accel, NAME_None, /*bAccelChange*/ true );
@@ -678,12 +688,18 @@ void UFlyingTruckComponent::ApplyFlightForces( UPrimitiveComponent* Body, float 
 	//   turn right = rotation about +Up
 	//   bank right = rotation about -Fwd
 	const FVector AngVel = FMath::DegreesToRadians( Body->GetPhysicsAngularVelocityInDegrees() );
-	FVector DesiredAngVel = -Right * FMath::DegreesToRadians( Pitch * PitchRateDegrees );
+	// While hovering the pitch keys move it up/down instead, and it levels itself.
+	FVector DesiredAngVel = -Right * FMath::DegreesToRadians( Pitch * PitchRateDegrees ) * ( 1.f - HoverBlend );
+	if( HoverBlend > 0.f )
+	{
+		const float NoseUpDegrees = FMath::RadiansToDegrees( FMath::Asin( FMath::Clamp( Fwd.Z, -1.f, 1.f ) ) );
+		DesiredAngVel += Right * FMath::DegreesToRadians( NoseUpDegrees * HoverLevelGain ) * HoverBlend;
+	}
 
-	if( bAirborne )
+	if( bAirborne || HoverBlend > 0.f )
 	{
 		const float CurrentBank = FMath::RadiansToDegrees( FMath::Asin( FMath::Clamp( -Right.Z, -1.f, 1.f ) ) );
-		const float TargetBank = Steer * MaxBankDegrees;
+		const float TargetBank = Steer * MaxBankDegrees * ( 1.f - HoverBlend );
 		const float RollRate = ( TargetBank - CurrentBank ) * RollGain;
 		DesiredAngVel += Up * FMath::DegreesToRadians( Steer * YawRateDegrees );
 		DesiredAngVel += -Fwd * FMath::DegreesToRadians( RollRate );
@@ -868,7 +884,7 @@ void UFlyingTruckComponent::UpdateGlow()
 	}
 	if( RingComponent )
 	{
-		RingComponent->SetVisibility( bFlightRing && bIsFlying );
+		RingComponent->SetVisibility( bFlightRing && ( bIsFlying || bRingAlwaysVisible ) );
 	}
 }
 
@@ -899,13 +915,9 @@ void UFlyingTruckComponent::CreateRing()
 	const float Scale = MeshDiameter > KINDA_SMALL_NUMBER ? RingDiameter / MeshDiameter : 1.f;
 	RingComponent->SetRelativeScale3D( FVector( Scale ) );
 
-	if( UMaterialInstanceDynamic* MID = RingComponent->CreateDynamicMaterialInstance( 0 ) )
-	{
-		MID->SetVectorParameterValue( TEXT( "Color" ), GlowColor );
-		MID->SetScalarParameterValue( TEXT( "Intensity" ), RingGlowIntensity );
-	}
-
-	RingComponent->SetVisibility( false );
+	RingMaterial = RingComponent->CreateDynamicMaterialInstance( 0 );
+	RingGlowAlpha = -1.f; // force the first UpdateRing to set the colour
+	RingComponent->SetVisibility( bRingAlwaysVisible );
 	RingComponent->RegisterComponent();
 }
 
@@ -996,6 +1008,89 @@ void UFlyingTruckComponent::UpdateWings( float DeltaTime )
 		// Each further plate sits just under the previous one so they nest when stacked.
 		const FVector Pivot( WingPivot.X, WingPivot.Y * Side, WingPivot.Z - Index * WingPlateThickness * 1.05f );
 		Plate->SetRelativeLocationAndRotation( Pivot + Rot.RotateVector( SlideLocal ), Rot );
+	}
+}
+
+void UFlyingTruckComponent::UpdateRing( float DeltaTime )
+{
+	if( !RingComponent )
+	{
+		return;
+	}
+	const float Target = bIsFlying ? 1.f : 0.f;
+	const float Previous = RingGlowAlpha;
+	if( RingGlowAlpha < 0.f || DeltaTime <= 0.f )
+	{
+		RingGlowAlpha = Target;
+	}
+	else
+	{
+		const float Step = DeltaTime / FMath::Max( RingFadeSeconds, 0.01f );
+		RingGlowAlpha = Target > RingGlowAlpha ? FMath::Min( RingGlowAlpha + Step, Target ) : FMath::Max( RingGlowAlpha - Step, Target );
+	}
+	if( RingGlowAlpha > 0.f )
+	{
+		// Spins up and down with the glow.
+		RingComponent->AddLocalRotation( FRotator( 0.f, RingSpinDegreesPerSecond * RingGlowAlpha * DeltaTime, 0.f ) );
+	}
+	if( RingMaterial && RingGlowAlpha != Previous )
+	{
+		const float A = FMath::SmoothStep( 0.f, 1.f, RingGlowAlpha );
+		RingMaterial->SetVectorParameterValue( TEXT( "Color" ), FMath::Lerp( RingIdleColor, GlowColor, A ) );
+		RingMaterial->SetScalarParameterValue( TEXT( "Intensity" ), FMath::Lerp( 1.f, RingGlowIntensity, A ) );
+	}
+}
+
+void UFlyingTruckComponent::CreateBodyParts()
+{
+	if( GetNetMode() == NM_DedicatedServer )
+	{
+		return;
+	}
+	if( bHideVehicleMesh )
+	{
+		TArray< USkeletalMeshComponent* > Meshes;
+		GetOwner()->GetComponents< USkeletalMeshComponent >( Meshes );
+		for( USkeletalMeshComponent* Mesh : Meshes )
+		{
+			// Hidden only: the base vehicle's physics body and wheels keep working.
+			Mesh->SetHiddenInGame( true );
+		}
+	}
+	if( BodyParts.Num() == 0 || BodyPartComponents.Num() > 0 )
+	{
+		return;
+	}
+	USceneComponent* Root = GetOwner()->GetRootComponent();
+	for( int32 i = 0; i < BodyParts.Num(); ++i )
+	{
+		const FFlyingBodyPart& Part = BodyParts[ i ];
+		UStaticMesh* Mesh = Part.Mesh.LoadSynchronous();
+		if( !Mesh || !Root )
+		{
+			UE_LOG( LogFlyingTrucks, Warning, TEXT( "%s: body part mesh %s not found." ), *GetOwner()->GetName(), *Part.Mesh.ToString() );
+			continue;
+		}
+		UStaticMeshComponent* Comp = NewObject< UStaticMeshComponent >( GetOwner(), *FString::Printf( TEXT( "FlyingBodyPart%d" ), i ) );
+		Comp->SetupAttachment( Root );
+		Comp->SetStaticMesh( Mesh );
+		Comp->SetCollisionEnabled( ECollisionEnabled::NoCollision );
+		Comp->SetCanEverAffectNavigation( false );
+		Comp->SetRelativeTransform( FTransform( Part.Rotation, Part.Location, Part.Scale ) );
+		if( UMaterialInterface* Material = Part.Material.LoadSynchronous() )
+		{
+			Comp->SetMaterial( 0, Material );
+		}
+		if( UMaterialInstanceDynamic* MID = Comp->CreateDynamicMaterialInstance( 0 ) )
+		{
+			MID->SetVectorParameterValue( TEXT( "Color" ), Part.Color );
+			if( Part.GlowIntensity > 0.f )
+			{
+				MID->SetScalarParameterValue( TEXT( "Intensity" ), Part.GlowIntensity );
+			}
+		}
+		Comp->RegisterComponent();
+		BodyPartComponents.Add( Comp );
 	}
 }
 
