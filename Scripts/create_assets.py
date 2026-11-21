@@ -649,4 +649,132 @@ root.set_editor_property("m_schematics", list(root.get_editor_property("m_schema
 save(bp_root)
 log("M-Bot saved")
 
+
+# --- 9. Refined Acclivity Stone: smelted from Acclivity Stone, needed to build the flying vehicles ---
+def write_gem_png(path, size=256):
+    """A cut, glowing blue gem (side view of a brilliant) on a transparent background."""
+    girdle_y, table_y, apex_y = 0.43, 0.25, 0.86
+    table_hw, girdle_hw = 0.17, 0.37
+    pav_points = [0.5 - girdle_hw, 0.5 - girdle_hw / 2, 0.5, 0.5 + girdle_hw / 2, 0.5 + girdle_hw]
+    rows = []
+    for j in range(size):
+        row = bytearray([0])
+        for i in range(size):
+            x, y = (i + 0.5) / size, (j + 0.5) / size
+            shade = None
+            if table_y <= y <= girdle_y:
+                t = (y - table_y) / (girdle_y - table_y)
+                hw = table_hw + (girdle_hw - table_hw) * t
+                if abs(x - 0.5) <= hw:
+                    # Crown facets: table in the middle, two slanted facets either side.
+                    inner = table_hw + (girdle_hw - table_hw) * t * 0.5
+                    if abs(x - 0.5) <= table_hw * (1 - t) + inner * t * 0.6:
+                        shade = 1.15 - 0.25 * t
+                    elif x < 0.5:
+                        shade = 0.95 if abs(x - 0.5) < (table_hw + girdle_hw) / 2 else 0.75
+                    else:
+                        shade = 1.05 if abs(x - 0.5) < (table_hw + girdle_hw) / 2 else 1.25
+            elif girdle_y < y <= apex_y:
+                t = (y - girdle_y) / (apex_y - girdle_y)
+                hw = girdle_hw * (1 - t)
+                if abs(x - 0.5) <= hw:
+                    # Pavilion facets fan down to the point; alternate light and dark.
+                    u = 0.5 + (x - 0.5) / max(1 - t, 1e-3)  # where this column meets the girdle
+                    k = sum(1 for px in pav_points if u > px) - 1
+                    shade = (0.55, 0.85, 0.65, 1.0)[max(0, min(3, k))] * (1.0 - 0.25 * t)
+            if shade is not None:
+                r, g, b, a = min(1, 0.12 * shade * 1.6), min(1, 0.55 * shade), min(1, 1.0 * shade), 1.0
+                # Sparkle on the table.
+                d = math.hypot(x - 0.42, y - 0.31)
+                if d < 0.035:
+                    r = g = b = 1.0
+            else:
+                d = math.hypot(x - 0.5, (y - 0.52) * 1.1)
+                glow = max(0.0, 1.0 - d / 0.47) ** 2 * 0.6
+                r, g, b, a = 0.3, 0.65, 1.0, glow
+            row += bytes([int(r * 255), int(g * 255), int(b * 255), int(a * 255)])
+        rows.append(bytes(row))
+
+    def chunk(tag, data):
+        c = struct.pack(">I", len(data)) + tag + data
+        return c + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0))
+    png += chunk(b"IDAT", zlib.compress(b"".join(rows), 9)) + chunk(b"IEND", b"")
+    with open(path, "wb") as f:
+        f.write(png)
+
+
+gem_png = os.path.join(art_dir, "Icon_RefinedAcclivityStone.png")
+write_gem_png(gem_png)
+gtask = unreal.AssetImportTask()
+gtask.set_editor_property("filename", gem_png)
+gtask.set_editor_property("destination_path", STONE_DIR)
+gtask.set_editor_property("destination_name", "Icon_RefinedAcclivityStone")
+gtask.set_editor_property("automated", True)
+gtask.set_editor_property("replace_existing", True)
+gtask.set_editor_property("save", True)
+asset_tools.import_asset_tasks([gtask])
+gem_icon = eal.load_asset(STONE_DIR + "/Icon_RefinedAcclivityStone")
+gem_icon.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_PROJECT01)
+gem_icon.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_DEFAULT)
+gem_icon.set_editor_property("srgb", True)
+gem_icon.set_editor_property("never_stream", False)
+save(gem_icon)
+
+bp_refined = make_blueprint("Desc_RefinedAcclivityStone",
+                            load_cls("/Game/FactoryGame/Resource/Parts/IronIngot/Desc_IronIngot.Desc_IronIngot_C"), STONE_DIR)
+compile_bp(bp_refined)
+refined = cdo_of(bp_refined)
+refined.set_editor_property("m_display_name", unreal.Text("Refined Acclivity Stone"))
+refined.set_editor_property("m_description", unreal.Text(
+    "Acclivity Stone smelted down and cut so it can be charged evenly. "
+    "Every flying vehicle is built around it."))
+refined.set_editor_property("m_small_icon", gem_icon)
+refined.set_editor_property("m_persistent_big_icon", gem_icon)
+refined.set_editor_property("m_conveyor_mesh", unreal.get_default_object(Desc_RawQuartz).get_editor_property("m_conveyor_mesh"))
+save(bp_refined)
+
+# Copies Iron Ingot smelting: Smelter, Craft Bench and automated workbench.
+bp_refine_recipe = make_blueprint("Recipe_RefinedAcclivityStone",
+                                  load_cls("/Game/FactoryGame/Recipes/Smelter/Recipe_IngotIron.Recipe_IngotIron_C"), STONE_DIR)
+compile_bp(bp_refine_recipe)
+rr = cdo_of(bp_refine_recipe)
+rr.set_editor_property("m_display_name", unreal.Text("Refined Acclivity Stone"))
+rr.set_editor_property("m_ingredients", [unreal.ItemAmount(item_class=bp_stone.generated_class(), amount=2)])
+rr.set_editor_property("m_product", [unreal.ItemAmount(item_class=bp_refined.generated_class(), amount=1)])
+rr.set_editor_property("m_manufactoring_duration", 4.0)
+rr.set_editor_property("m_manual_manufacturing_multiplier", 1.0)
+save(bp_refine_recipe)
+
+bp_refine_schem = make_blueprint("Schematic_RefinedAcclivityStone", unreal.FGSchematic, STONE_DIR)
+compile_bp(bp_refine_schem)
+rs = cdo_of(bp_refine_schem)
+rs.set_editor_property("m_type", unreal.SchematicType.EST_CUSTOM)
+rs.set_editor_property("m_display_name", unreal.Text("Refined Acclivity Stone"))
+rs.set_editor_property("m_tech_tier", 0)
+rs.set_editor_property("m_time_to_complete", 0.0)
+rs_unlock = unreal.new_object(BP_UnlockRecipe, outer=rs)
+rs_unlock.set_editor_property("m_recipes", [bp_refine_recipe.generated_class()])
+rs.set_editor_property("m_unlocks", [rs_unlock])
+save(bp_refine_schem)
+root.set_editor_property("m_schematics", list(root.get_editor_property("m_schematics")) + [bp_refine_schem.generated_class()])
+save(bp_root)
+
+# Every flying vehicle costs its base vehicle's ingredients plus some Refined Acclivity Stone.
+# Built from the parent recipe each time, so re-running the script doesn't keep adding more.
+REFINED_COST = (
+    (bp_recipe, "/Game/FactoryGame/Recipes/Vehicle/Recipe_Truck.Recipe_Truck_C", 10),
+    (flying_recipes[0], "/Game/FactoryGame/Recipes/Vehicle/Recipe_Explorer.Recipe_Explorer_C", 5),
+    (flying_recipes[1], "/Game/FactoryGame/Recipes/Vehicle/Recipe_Tractor.Recipe_Tractor_C", 5),
+    (flying_recipes[2], "/Game/FactoryGame/Recipes/Vehicle/Recipe_FactoryCart.Recipe_FactoryCart_C", 2),
+    (mbot_recipe, "/Game/FactoryGame/Recipes/Vehicle/Recipe_Explorer.Recipe_Explorer_C", 20),
+)
+for recipe_bp, parent_path, amount in REFINED_COST:
+    base = list(unreal.get_default_object(load_cls(parent_path)).get_editor_property("m_ingredients"))
+    cdo_of(recipe_bp).set_editor_property("m_ingredients", base + [unreal.ItemAmount(item_class=bp_refined.generated_class(), amount=amount)])
+    save(recipe_bp)
+    log("%s now needs %d Refined Acclivity Stone" % (recipe_bp.get_name(), amount))
+log("Refined Acclivity Stone saved")
+
 log("All FlyingTrucks assets created and saved.")
