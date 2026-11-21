@@ -108,6 +108,7 @@ def prism(mesh, outline, thickness_dir, thickness):
         mesh.tri(top[i], bot[j], bot[i], inside)
 
 
+WING_PIVOT = (10.0, 200.0, 125.0)  # right wing's pivot on the body (front corner of the wing root), before scaling
 WING_SWING_DEGREES = 34.0  # wings swing out by this much in flight (the faint outline in the reference drawing)
 
 
@@ -163,7 +164,17 @@ def build_mbot():
     extended = [_rot_yaw(p, -WING_SWING_DEGREES) for p in folded]
     wing = Mesh()
     prism(wing, extended, (0, 0, 1), 14)
+
+    # Fill the gap between the body and the extended wing: a thin plate from the wing's two root corners
+    # (in the flight pose) straight in to the body. Swept back on the ground, the wing covers it.
+    px, py, pz = WING_PIVOT
+    root_front, root_rear = extended[0], extended[2]
+    for side in (1, -1):
+        outer_front = (px + root_front[0], (py + root_front[1]) * side, pz)
+        outer_rear = (px + root_rear[0], (py + root_rear[1]) * side, pz)
+        inner_rear = (outer_rear[0], 70 * side, pz)
+        inner_front = (outer_front[0], 70 * side, pz)
+        prism(hull, [outer_front, outer_rear, inner_rear, inner_front], (0, 0, 1), 12)
     return {"Hull": hull, "Canopy": canopy, "Engine": engine, "Wing": wing}
 
 
-WING_PIVOT = (10.0, 200.0, 125.0)  # right wing's pivot on the body (front corner of the wing root), before scaling

@@ -109,6 +109,7 @@ void UFlyingTruckComponent::EndPlay( const EEndPlayReason::Type EndPlayReason )
 	if( UWorld* World = GetWorld() )
 	{
 		World->GetTimerManager().ClearTimer( PaintTimer );
+		World->GetTimerManager().ClearTimer( HideMeshTimer );
 	}
 	if( APawn* Pawn = Cast< APawn >( GetOwner() ) )
 	{
@@ -1045,6 +1046,21 @@ void UFlyingTruckComponent::UpdateRing( float DeltaTime )
 	}
 }
 
+void UFlyingTruckComponent::HideVehicleMeshes()
+{
+	TArray< UMeshComponent* > Meshes;
+	GetOwner()->GetComponents< UMeshComponent >( Meshes );
+	for( UMeshComponent* Mesh : Meshes )
+	{
+		const bool bOurs = Mesh == RingComponent || WingPlates.Contains( Mesh ) || BodyPartComponents.Contains( Mesh );
+		if( !bOurs && !Mesh->bHiddenInGame )
+		{
+			// Hidden only: the base vehicle's physics body and wheels keep working.
+			Mesh->SetHiddenInGame( true );
+		}
+	}
+}
+
 void UFlyingTruckComponent::CreateBodyParts()
 {
 	if( GetNetMode() == NM_DedicatedServer )
@@ -1053,13 +1069,9 @@ void UFlyingTruckComponent::CreateBodyParts()
 	}
 	if( bHideVehicleMesh )
 	{
-		TArray< USkeletalMeshComponent* > Meshes;
-		GetOwner()->GetComponents< USkeletalMeshComponent >( Meshes );
-		for( USkeletalMeshComponent* Mesh : Meshes )
-		{
-			// Hidden only: the base vehicle's physics body and wheels keep working.
-			Mesh->SetHiddenInGame( true );
-		}
+		HideVehicleMeshes();
+		// The game can switch parts back on (e.g. when the vehicle comes back into view), so keep checking.
+		GetWorld()->GetTimerManager().SetTimer( HideMeshTimer, this, &UFlyingTruckComponent::HideVehicleMeshes, 2.0f, true );
 	}
 	if( BodyParts.Num() == 0 || BodyPartComponents.Num() > 0 )
 	{

@@ -389,6 +389,8 @@ protected:
 	void UpdateWings( float DeltaTime );
 	void UpdateRing( float DeltaTime );
 	void CreateBodyParts();
+	/** Hides every mesh on the vehicle that isn't one of ours (bHideVehicleMesh). */
+	void HideVehicleMeshes();
 
 	/** Sets the custom paint via reflection (avoids depending on FFactoryCustomizationData's C++ layout). */
 	void ApplyDefaultPaint();
@@ -493,6 +495,8 @@ private:
 
 	UPROPERTY( Transient )
 	TArray< TObjectPtr< UStaticMeshComponent > > BodyPartComponents;
+
+	FTimerHandle HideMeshTimer;
 
 	/** 0 = folded into the body, 1 = fully out. */
 	float WingDeployAlpha = 0.f;
