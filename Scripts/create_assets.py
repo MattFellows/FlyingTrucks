@@ -129,12 +129,133 @@ unlock.set_editor_property("m_recipes", [bp_recipe.generated_class()])
 schem.set_editor_property("m_unlocks", [unlock])
 save(bp_schem)
 
+# --- 4b. Acclivity Stone: flight fuel, mined from converted iron/limestone nodes ---
+import os
+import struct
+import zlib
+import math as _m
+
+
+def write_crystal_png(path, size=256):
+    """A pale-blue glowing crystal cluster on a transparent background (RGBA PNG, pure Python)."""
+    def facets():
+        # (centre x, base y, half width, height, tilt) in 0..1 units; the middle one is the biggest.
+        return [(0.50, 0.88, 0.15, 0.74, 0.00), (0.31, 0.90, 0.11, 0.48, -0.20), (0.70, 0.90, 0.11, 0.52, 0.22)]
+
+    def crystal_alpha(x, y):
+        """Returns (inside, shade) for the frontmost crystal at x, y."""
+        best = None
+        for cx, by, hw, h, tilt in facets():
+            # Axis along the crystal, tilted.
+            ax, ay = _m.sin(tilt), -_m.cos(tilt)
+            dx, dy = x - cx, y - by
+            along = dx * ax + dy * ay           # 0 at base, h at tip
+            across = dx * _m.cos(tilt) + dy * _m.sin(tilt)  # signed sideways distance
+            if along < 0 or along > h:
+                continue
+            tip_start = h * 0.72
+            width = hw if along < tip_start else hw * (h - along) / (h - tip_start)
+            if abs(across) <= width:
+                shade = 0.8 + 0.35 * (across / max(width, 1e-6))  # lit from the right
+                # Centre ridge highlight.
+                if abs(across) < width * 0.12:
+                    shade = 1.25
+                cand = (along / h, shade)
+                if best is None or hw > best[2]:
+                    best = (cand[0], cand[1], hw)
+        return best
+
+    rows = []
+    for j in range(size):
+        row = bytearray([0])
+        for i in range(size):
+            x, y = (i + 0.5) / size, (j + 0.5) / size
+            hit = crystal_alpha(x, y)
+            if hit:
+                t, shade, _ = hit
+                base = (0.10 + 0.50 * t, 0.45 + 0.45 * t, 1.0)   # deeper blue at the base, near-white tips
+                r, g, b = [min(1.0, c * shade) for c in base]
+                a = 1.0
+            else:
+                # Soft blue halo around the cluster.
+                d = _m.hypot(x - 0.5, (y - 0.6) * 0.9)
+                glow = max(0.0, 1.0 - d / 0.45) ** 2 * 0.55
+                r, g, b, a = 0.25, 0.6, 1.0, glow
+            row += bytes([int(r * 255), int(g * 255), int(b * 255), int(a * 255)])
+        rows.append(bytes(row))
+
+    def chunk(tag, data):
+        c = struct.pack(">I", len(data)) + tag + data
+        return c + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0))
+    png += chunk(b"IDAT", zlib.compress(b"".join(rows), 9)) + chunk(b"IEND", b"")
+    with open(path, "wb") as f:
+        f.write(png)
+
+
+STONE_DIR = ROOT + "/Resources"
+art_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "SourceArt")
+os.makedirs(art_dir, exist_ok=True)
+icon_png = os.path.join(art_dir, "Icon_AcclivityStone.png")
+write_crystal_png(icon_png)
+icon_task = unreal.AssetImportTask()
+icon_task.set_editor_property("filename", icon_png)
+icon_task.set_editor_property("destination_path", STONE_DIR)
+icon_task.set_editor_property("destination_name", "Icon_AcclivityStone")
+icon_task.set_editor_property("automated", True)
+icon_task.set_editor_property("replace_existing", True)
+icon_task.set_editor_property("save", True)
+asset_tools.import_asset_tasks([icon_task])
+icon = eal.load_asset(STONE_DIR + "/Icon_AcclivityStone")
+if icon is None:
+    raise RuntimeError("Icon import failed")
+icon.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_UI)
+icon.set_editor_property("never_stream", True)
+save(icon)
+log("Imported Acclivity Stone icon")
+
+Desc_Stone = load_cls("/Game/FactoryGame/Resource/RawResources/Stone/Desc_Stone.Desc_Stone_C")
+Desc_RawQuartz = load_cls("/Game/FactoryGame/Resource/RawResources/RawQuartz/Desc_RawQuartz.Desc_RawQuartz_C")
+bp_stone = make_blueprint("Desc_AcclivityStone", Desc_Stone, STONE_DIR)
+compile_bp(bp_stone)
+stone = cdo_of(bp_stone)
+stone.set_editor_property("m_display_name", unreal.Text("Acclivity Stone"))
+stone.set_editor_property("m_description", unreal.Text(
+    "A pale blue stone that pushes against gravity when charged. "
+    "Flying Trucks burn one per minute of flight; keep some in the truck's cargo to take off."))
+stone.set_editor_property("m_small_icon", icon)
+stone.set_editor_property("m_persistent_big_icon", icon)
+stone.set_editor_property("m_ping_color", unreal.LinearColor(0.1, 0.45, 1.0, 1.0))
+# A crystal looks more like it than a lump of limestone on the belts.
+stone.set_editor_property("m_conveyor_mesh", unreal.get_default_object(Desc_RawQuartz).get_editor_property("m_conveyor_mesh"))
+save(bp_stone)
+
+# Scanner unlock goes in its own schematic: saves that already have Schematic_FlyingTruck get it too.
+bp_stone_schem = make_blueprint("Schematic_AcclivityStone", unreal.FGSchematic)
+compile_bp(bp_stone_schem)
+stone_schem = cdo_of(bp_stone_schem)
+stone_schem.set_editor_property("m_type", unreal.SchematicType.EST_CUSTOM)
+stone_schem.set_editor_property("m_display_name", unreal.Text("Acclivity Stone"))
+stone_schem.set_editor_property("m_tech_tier", 0)
+stone_schem.set_editor_property("m_time_to_complete", 0.0)
+BP_UnlockScannableResource = load_cls("/Game/FactoryGame/Unlocks/BP_UnlockScannableResource.BP_UnlockScannableResource_C")
+scan_unlock = unreal.new_object(BP_UnlockScannableResource, outer=stone_schem)
+# The pair's fields are EditDefaultsOnly, which Python refuses on a struct value; import it as text instead.
+pair = unreal.ScannableResourcePair()
+pair.import_text('(ResourceDescriptor="%s",ResourceNodeType=Node)' % bp_stone.generated_class().get_path_name())
+log("Scanner pair: %s" % pair.export_text())
+scan_unlock.set_editor_property("m_resource_pairs_to_add_to_scanner", [pair])
+stone_schem.set_editor_property("m_unlocks", [scan_unlock])
+save(bp_stone_schem)
+log("Acclivity Stone assets saved")
+
 # --- 5. Root game world module -------------------------------------------
 bp_root = make_blueprint("RootGameWorld_FlyingTrucks", unreal.GameWorldModule)
 compile_bp(bp_root)
 root = cdo_of(bp_root)
 root.set_editor_property("root_module", True)
-root.set_editor_property("m_schematics", [bp_schem.generated_class()])
+root.set_editor_property("m_schematics", [bp_schem.generated_class(), bp_stone_schem.generated_class()])
 root.set_editor_property("mod_subsystems", [unreal.FlyingTrucksSubsystem.static_class()])
 save(bp_root)
 

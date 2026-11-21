@@ -22,6 +22,12 @@
 #include "InputMappingContext.h"
 #include "TimerManager.h"
 #include "UObject/UnrealType.h"
+#include "FGChatManager.h"
+#include "FGInventoryComponent.h"
+#include "Resources/FGItemDescriptor.h"
+#include "WheeledVehicles/FGWheeledVehicle.h"
+
+#define LOCTEXT_NAMESPACE "FlyingTrucks"
 
 UFlyingTruckComponent::UFlyingTruckComponent()
 {
@@ -61,6 +67,15 @@ void UFlyingTruckComponent::BeginPlay()
 	else
 	{
 		UE_LOG( LogFlyingTrucks, Warning, TEXT( "UFlyingTruckComponent must be added to a pawn (vehicle); owner is %s." ), *GetOwner()->GetName() );
+	}
+
+	if( !FlightFuelItem.IsNull() )
+	{
+		FuelItemClass = FlightFuelItem.LoadSynchronous();
+		if( !FuelItemClass )
+		{
+			UE_LOG( LogFlyingTrucks, Warning, TEXT( "Flight fuel item %s not found; flight will not need fuel." ), *FlightFuelItem.ToString() );
+		}
 	}
 
 	CreateGlowLights();
@@ -278,12 +293,122 @@ void UFlyingTruckComponent::SetFlying( bool bNewFlying )
 	{
 		return;
 	}
-	// Apply immediately here (no lag for the driver); the server's value then replicates to everyone.
+	const bool bAuthority = GetOwner()->HasAuthority();
+	if( bNewFlying && !bAuthority )
+	{
+		// Only the server can see the cargo, so it decides whether we may take off; flight mode
+		// switches on here when its answer replicates back.
+		Server_SetFlying( true );
+		return;
+	}
+	if( bNewFlying && FuelItemClass && GetFuelCount() <= 0 )
+	{
+		NotifyDriver( FText::Format( LOCTEXT( "NoFuel", "Flight needs {0} in the truck's cargo." ),
+			UFGItemDescriptor::GetItemName( TSubclassOf< UFGItemDescriptor >( FuelItemClass.Get() ) ) ) );
+		return;
+	}
+	// Landing is applied immediately here (no lag for the driver); the server's value then replicates to everyone.
 	bIsFlying = bNewFlying;
 	ApplyFlightModeLocally();
-	if( !GetOwner()->HasAuthority() )
+	if( !bAuthority )
 	{
 		Server_SetFlying( bNewFlying );
+	}
+	else if( bNewFlying )
+	{
+		bLowFuelWarned = false;
+		UE_LOG( LogFlyingTrucks, Log, TEXT( "%s: taking off with %d fuel item(s)." ), *GetOwner()->GetName(), GetFuelCount() );
+	}
+}
+
+int32 UFlyingTruckComponent::GetFuelCount() const
+{
+	const AFGWheeledVehicle* Vehicle = Cast< AFGWheeledVehicle >( GetOwner() );
+	UFGInventoryComponent* Cargo = Vehicle ? Vehicle->GetStorageInventory() : nullptr;
+	if( !Cargo || !FuelItemClass )
+	{
+		return 0;
+	}
+	return Cargo->GetNumItems( TSubclassOf< UFGItemDescriptor >( FuelItemClass.Get() ) );
+}
+
+void UFlyingTruckComponent::TickFuel( float DeltaTime )
+{
+	if( !FuelItemClass )
+	{
+		return;
+	}
+	FlightSecondsSinceBurn += DeltaTime;
+
+	// No need to count the cargo every frame.
+	FuelCheckTimer -= DeltaTime;
+	const bool bBurnNow = FlightSecondsSinceBurn >= FlightSecondsPerFuelItem;
+	if( FuelCheckTimer > 0.f && !bBurnNow )
+	{
+		return;
+	}
+	FuelCheckTimer = 0.25f;
+
+	const FText ItemName = UFGItemDescriptor::GetItemName( TSubclassOf< UFGItemDescriptor >( FuelItemClass.Get() ) );
+	int32 Count = GetFuelCount();
+	if( Count > 0 && bBurnNow )
+	{
+		const AFGWheeledVehicle* Vehicle = Cast< AFGWheeledVehicle >( GetOwner() );
+		Vehicle->GetStorageInventory()->Remove( TSubclassOf< UFGItemDescriptor >( FuelItemClass.Get() ), 1 );
+		FlightSecondsSinceBurn -= FlightSecondsPerFuelItem;
+		--Count;
+		UE_LOG( LogFlyingTrucks, Log, TEXT( "%s: burned 1 fuel item, %d left." ), *GetOwner()->GetName(), Count );
+	}
+	if( Count <= 0 )
+	{
+		NotifyDriver( FText::Format( LOCTEXT( "OutOfFuel", "Out of {0} - flight mode off!" ), ItemName ) );
+		SetFlying( false );
+		return;
+	}
+	const float SecondsLeft = Count * FlightSecondsPerFuelItem - FlightSecondsSinceBurn;
+	if( SecondsLeft <= LowFuelWarningSeconds )
+	{
+		if( !bLowFuelWarned )
+		{
+			bLowFuelWarned = true;
+			NotifyDriver( FText::Format( LOCTEXT( "LowFuel", "Last {0} nearly used up - {1} seconds of flight left!" ),
+				ItemName, FText::AsNumber( FMath::CeilToInt( SecondsLeft ) ) ) );
+		}
+	}
+	else
+	{
+		bLowFuelWarned = false; // more stone was added
+	}
+}
+
+void UFlyingTruckComponent::NotifyDriver( const FText& Message )
+{
+	if( BoundController )
+	{
+		ShowLocalMessage( Message );
+		return;
+	}
+	const APawn* Pawn = Cast< APawn >( GetOwner() );
+	if( GetOwner()->HasAuthority() && Pawn && Pawn->GetController() )
+	{
+		Client_Notify( Message );
+	}
+}
+
+void UFlyingTruckComponent::Client_Notify_Implementation( const FText& Message )
+{
+	ShowLocalMessage( Message );
+}
+
+void UFlyingTruckComponent::ShowLocalMessage( const FText& Message ) const
+{
+	UE_LOG( LogFlyingTrucks, Log, TEXT( "Message: %s" ), *Message.ToString() );
+	if( AFGChatManager* Chat = AFGChatManager::Get( GetWorld() ) )
+	{
+		FChatMessageStruct Msg;
+		Msg.MessageText = Message;
+		Msg.MessageType = EFGChatMessageType::CMT_SystemMessage;
+		Chat->AddChatMessageToReceived( Msg );
 	}
 }
 
@@ -365,6 +490,11 @@ void UFlyingTruckComponent::TickComponent( float DeltaTime, ELevelTick TickType,
 	}
 	if( bAuthority )
 	{
+		TickFuel( DeltaTime );
+		if( !bIsFlying )
+		{
+			return; // just ran out
+		}
 		// Share the driver's controls with onlookers so their copy of the truck flies the same way.
 		const FFlyingTruckInput Current = BoundController ? GatherLocalInput() : RemoteInput;
 		if( !Current.IsNearlyEqual( ReplicatedInput, 0.01f ) )
@@ -680,3 +810,5 @@ void UFlyingTruckComponent::CreateRing()
 	RingComponent->SetVisibility( false );
 	RingComponent->RegisterComponent();
 }
+
+#undef LOCTEXT_NAMESPACE

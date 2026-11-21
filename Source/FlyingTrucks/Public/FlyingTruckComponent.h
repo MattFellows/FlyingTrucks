@@ -64,6 +64,10 @@ struct FFlyingTruckInput
  *   A, D / Left stick        bank and turn
  *   (read by this component in flight mode, and still passed on to the truck)
  *
+ * Flight needs Acclivity Stone in the truck's cargo: one stone is burned per minute of flight, and the
+ * truck drops out of flight mode when the last one is used up. The server decides; the driver gets a
+ * chat message when flight is refused or the stone runs out.
+ *
  * Multiplayer: flight mode is replicated (so everyone sees the ring/glow). The driver's controls are
  * sent to the server and replicated on to the other players, and the flight forces run on every machine
  * (server, driver, onlookers) so each copy of the truck flies the same way between network corrections.
@@ -195,6 +199,18 @@ public:
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
 	float RingGlowIntensity = 20.f;
 
+	/** Item that must be in the truck's cargo to fly (Acclivity Stone). Empty = no fuel needed. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Fuel" )
+	TSoftClassPtr< UObject > FlightFuelItem = TSoftClassPtr< UObject >( FSoftObjectPath( TEXT( "/FlyingTrucks/Resources/Desc_AcclivityStone.Desc_AcclivityStone_C" ) ) );
+
+	/** Seconds of flight per stone. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Fuel" )
+	float FlightSecondsPerFuelItem = 60.f;
+
+	/** Warn the driver this many seconds before the last stone is used up. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Fuel" )
+	float LowFuelWarningSeconds = 10.f;
+
 	/** Minimum time between flight toggles, seconds. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Input" )
 	float ToggleCooldownSeconds = 0.5f;
@@ -258,6 +274,19 @@ protected:
 	FFlyingTruckInput GatherLocalInput() const;
 	void SendInputToServer( float DeltaTime );
 
+	// ---- Acclivity Stone (server decides) ----
+	/** Stones in the truck's cargo (server). */
+	int32 GetFuelCount() const;
+	/** Server: burn fuel while flying, land when it runs out. */
+	void TickFuel( float DeltaTime );
+	/** Shows a chat line to whoever is driving (locally, or via a client RPC). */
+	void NotifyDriver( const FText& Message );
+	/** Adds a local system chat line on this machine. */
+	void ShowLocalMessage( const FText& Message ) const;
+
+	UFUNCTION( Client, Reliable )
+	void Client_Notify( const FText& Message );
+
 private:
 	UPROPERTY( Transient, ReplicatedUsing = OnRep_IsFlying )
 	bool bIsFlying = false;
@@ -272,6 +301,14 @@ private:
 	/** Driving client only: what was last sent to the server, and when. */
 	FFlyingTruckInput LastSentInput;
 	double LastInputSendTime = -1000.0;
+
+	/** Server: flight time since the last stone was burned (kept across toggles so hopping is not free). */
+	float FlightSecondsSinceBurn = 0.f;
+	bool bLowFuelWarned = false;
+	float FuelCheckTimer = 0.f;
+
+	UPROPERTY( Transient )
+	TObjectPtr< UClass > FuelItemClass;
 
 	double LastToggleTime = -1000.0;
 	bool bToggleKeyHeld = false;
