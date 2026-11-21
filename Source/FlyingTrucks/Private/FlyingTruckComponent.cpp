@@ -80,6 +80,10 @@ void UFlyingTruckComponent::BeginPlay()
 
 	CreateGlowLights();
 	CreateRing();
+	CreateWings();
+	// Late joiners whose truck is already flying start with the wings out.
+	WingDeployAlpha = bIsFlying ? 1.f : 0.f;
+	UpdateWings( 0.f );
 	// A late-joining client may already have bIsFlying = true replicated before BeginPlay.
 	UpdateGlow();
 
@@ -473,6 +477,8 @@ void UFlyingTruckComponent::TickComponent( float DeltaTime, ELevelTick TickType,
 {
 	Super::TickComponent( DeltaTime, TickType, ThisTickFunction );
 
+	UpdateWings( DeltaTime );
+
 	if( !bIsFlying || DeltaTime <= 0.f )
 	{
 		return;
@@ -809,6 +815,74 @@ void UFlyingTruckComponent::CreateRing()
 
 	RingComponent->SetVisibility( false );
 	RingComponent->RegisterComponent();
+}
+
+void UFlyingTruckComponent::CreateWings()
+{
+	if( !bFlightWings || GetNetMode() == NM_DedicatedServer || RightWing )
+	{
+		return;
+	}
+	USceneComponent* Root = GetOwner()->GetRootComponent();
+	UStaticMesh* Mesh = WingMesh.LoadSynchronous();
+	if( !Root || !Mesh )
+	{
+		UE_LOG( LogFlyingTrucks, Warning, TEXT( "%s: wing mesh %s not found." ), *GetOwner()->GetName(), *WingMesh.ToString() );
+		return;
+	}
+
+	// The mesh's pivot is its front point; work out which way it extends (importers may mirror axes)
+	// so the right wing goes back and to +Y, the left back and to -Y.
+	const FBoxSphereBounds Bounds = Mesh->GetBounds();
+	const float SignX = Bounds.Origin.X <= 0.f ? 1.f : -1.f;
+	const float SignY = Bounds.Origin.Y >= 0.f ? 1.f : -1.f;
+	const float Chord = Bounds.BoxExtent.X * 2.f;
+	const float Span = Bounds.BoxExtent.Y * 2.f;
+	// Folding swings the tip in until the leading edge lies along the truck, plus a little extra.
+	WingFoldYaw = FMath::RadiansToDegrees( FMath::Atan2( Span, FMath::Max( Chord, 1.f ) ) ) + WingExtraFoldDegrees;
+
+	auto MakeWing = [&]( const TCHAR* Name, float Side ) -> UStaticMeshComponent*
+	{
+		UStaticMeshComponent* Wing = NewObject< UStaticMeshComponent >( GetOwner(), Name );
+		Wing->SetupAttachment( Root );
+		Wing->SetStaticMesh( Mesh );
+		Wing->SetCollisionEnabled( ECollisionEnabled::NoCollision );
+		Wing->SetCanEverAffectNavigation( false );
+		Wing->SetRelativeLocation( FVector( WingPivot.X, WingPivot.Y * Side, WingPivot.Z ) );
+		Wing->SetRelativeScale3D( FVector( SignX, SignY * Side, 1.f ) );
+		if( UMaterialInstanceDynamic* MID = Wing->CreateDynamicMaterialInstance( 0 ) )
+		{
+			MID->SetVectorParameterValue( TEXT( "Color" ), WingColor );
+		}
+		Wing->RegisterComponent();
+		return Wing;
+	};
+	RightWing = MakeWing( TEXT( "FlyingTruckWingRight" ), 1.f );
+	LeftWing = MakeWing( TEXT( "FlyingTruckWingLeft" ), -1.f );
+}
+
+void UFlyingTruckComponent::UpdateWings( float DeltaTime )
+{
+	if( !RightWing || !LeftWing )
+	{
+		return;
+	}
+	const float Target = bIsFlying ? 1.f : 0.f;
+	if( DeltaTime > 0.f )
+	{
+		if( WingDeployAlpha == Target )
+		{
+			return;
+		}
+		const float Step = DeltaTime / FMath::Max( WingDeploySeconds, 0.01f );
+		WingDeployAlpha = Target > WingDeployAlpha ? FMath::Min( WingDeployAlpha + Step, Target ) : FMath::Max( WingDeployAlpha - Step, Target );
+	}
+	// Ease in and out; yaw swings the tip forward/outwards about the front point.
+	const float Eased = FMath::SmoothStep( 0.f, 1.f, WingDeployAlpha );
+	const float Yaw = WingFoldYaw * ( 1.f - Eased );
+	// Right wing extends to +Y; folding it inwards turns its tip towards -Y, which is a positive yaw.
+	RightWing->SetRelativeRotation( FRotator( 0.f, Yaw, 0.f ) );
+	LeftWing->SetRelativeRotation( FRotator( 0.f, -Yaw, 0.f ) );
 }
 
 #undef LOCTEXT_NAMESPACE

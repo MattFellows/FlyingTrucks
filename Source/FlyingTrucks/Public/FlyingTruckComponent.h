@@ -199,6 +199,29 @@ public:
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
 	float RingGlowIntensity = 20.f;
 
+	/** Delta wings that swing out of the truck's sides in flight mode. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
+	bool bFlightWings = true;
+
+	/** Triangle with its pivot (front point) at the mesh origin, extending backwards and to one side. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
+	TSoftObjectPtr< UStaticMesh > WingMesh = TSoftObjectPtr< UStaticMesh >( FSoftObjectPath( TEXT( "/FlyingTrucks/Wings/SM_FlyingWing.SM_FlyingWing" ) ) );
+
+	/** Right wing's pivot (its front point), truck-local cm; the left wing mirrors it. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
+	FVector WingPivot = FVector( 150.f, 130.f, 110.f );
+
+	/** Extra inward swing when folded, degrees, so the tip ends up well inside the body. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
+	float WingExtraFoldDegrees = 3.f;
+
+	/** Time to fully extend or fold, seconds. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
+	float WingDeploySeconds = 0.8f;
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
+	FLinearColor WingColor = FLinearColor( 0.035f, 0.035f, 0.04f );
+
 	/** Item that must be in the truck's cargo to fly (Acclivity Stone). Empty = no fuel needed. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Flight|Fuel" )
 	TSoftClassPtr< UObject > FlightFuelItem = TSoftClassPtr< UObject >( FSoftObjectPath( TEXT( "/FlyingTrucks/Resources/Desc_AcclivityStone.Desc_AcclivityStone_C" ) ) );
@@ -253,6 +276,8 @@ protected:
 	void CreateGlowLights();
 	void CreateRing();
 	void UpdateGlow();
+	void CreateWings();
+	void UpdateWings( float DeltaTime );
 
 	/** Sets the custom paint via reflection (avoids depending on FFactoryCustomizationData's C++ layout). */
 	void ApplyDefaultPaint();
@@ -335,6 +360,17 @@ private:
 
 	UPROPERTY( Transient )
 	TObjectPtr< UStaticMeshComponent > RingComponent;
+
+	UPROPERTY( Transient )
+	TObjectPtr< UStaticMeshComponent > LeftWing;
+
+	UPROPERTY( Transient )
+	TObjectPtr< UStaticMeshComponent > RightWing;
+
+	/** 0 = folded into the body, 1 = fully out. */
+	float WingDeployAlpha = 0.f;
+	/** Yaw that folds the right wing in (left uses the negative); from the mesh's shape. */
+	float WingFoldYaw = 0.f;
 
 	UPROPERTY( Transient )
 	TObjectPtr< UEnhancedInputComponent > FlightInputComponent;
