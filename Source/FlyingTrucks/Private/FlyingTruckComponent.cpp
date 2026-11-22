@@ -31,6 +31,9 @@
 #include "FGCharacterPlayer.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/BlueprintGeneratedClass.h"
+#include "Engine/SimpleConstructionScript.h"
+#include "Engine/SCS_Node.h"
 
 #define LOCTEXT_NAMESPACE "FlyingTrucks"
 
@@ -394,25 +397,55 @@ namespace
 	}
 }
 
+namespace
+{
+	/**
+	 * How a vehicle relates to the reference (Truck) the ring/wing settings were tuned on:
+	 * positions map as OwnC + ( P - RefC ) * S. False when no fitting is needed or possible.
+	 */
+	bool ComputeVehicleFit( const AActor* Vehicle, const TSoftClassPtr< AActor >& ReferenceVehicle, FVector& OwnC, FVector& RefC, FVector& S )
+	{
+		UClass* RefClass = ReferenceVehicle.LoadSynchronous();
+		if( !Vehicle || !RefClass || Vehicle->IsA( RefClass ) )
+		{
+			return false; // the Truck: values are tuned for it
+		}
+		FBox Own, Ref;
+		if( !GetVehicleMeshBox( Vehicle, Own ) || !GetVehicleMeshBox( RefClass->GetDefaultObject< AActor >(), Ref ) )
+		{
+			UE_LOG( LogFlyingTrucks, Warning, TEXT( "%s: couldn't measure the vehicle; using Truck-sized ring/wings." ), *Vehicle->GetName() );
+			return false;
+		}
+		OwnC = Own.GetCenter();
+		RefC = Ref.GetCenter();
+		S = Own.GetExtent() / Ref.GetExtent().ComponentMax( FVector( 1.f ) );
+		return true;
+	}
+
+	/** Swing that folds a wing mesh's tip in until its leading edge lies along the vehicle. */
+	float WingFoldYawFor( const FBoxSphereBounds& Bounds, float Scale, float Override, float Extra )
+	{
+		if( Override > 0.f )
+		{
+			return Override;
+		}
+		const float Chord = Bounds.BoxExtent.X * 2.f * Scale;
+		const float Span = Bounds.BoxExtent.Y * 2.f * Scale;
+		return FMath::RadiansToDegrees( FMath::Atan2( Span, FMath::Max( Chord, 1.f ) ) ) + Extra;
+	}
+}
+
 void UFlyingTruckComponent::FitToVehicle()
 {
 	if( !bScaleToVehicle || ReferenceVehicle.IsNull() )
 	{
 		return;
 	}
-	UClass* RefClass = ReferenceVehicle.LoadSynchronous();
-	if( !RefClass || GetOwner()->IsA( RefClass ) )
+	FVector OwnC, RefC, S;
+	if( !ComputeVehicleFit( GetOwner(), ReferenceVehicle, OwnC, RefC, S ) )
 	{
-		return; // the Truck: values are tuned for it
-	}
-	FBox Own, Ref;
-	if( !GetVehicleMeshBox( GetOwner(), Own ) || !GetVehicleMeshBox( RefClass->GetDefaultObject< AActor >(), Ref ) )
-	{
-		UE_LOG( LogFlyingTrucks, Warning, TEXT( "%s: couldn't measure the vehicle; using Truck-sized ring/wings." ), *GetOwner()->GetName() );
 		return;
 	}
-	const FVector OwnC = Own.GetCenter(), RefC = Ref.GetCenter();
-	const FVector S = Own.GetExtent() / Ref.GetExtent().ComponentMax( FVector( 1.f ) );
 	auto Map = [&]( const FVector& P ) { return OwnC + ( P - RefC ) * S; };
 
 	RingDiameter *= S.Y;
@@ -424,8 +457,8 @@ void UFlyingTruckComponent::FitToVehicle()
 		WingPivot = Map( WingPivot );
 		WingScale *= FMath::Min( S.X, S.Y );
 	}
-	UE_LOG( LogFlyingTrucks, Log, TEXT( "%s: mesh box %s vs truck %s -> scale %s; ring %.0f at %s, wings x%.2f at %s" ),
-		*GetOwner()->GetName(), *Own.ToString(), *Ref.ToString(), *S.ToCompactString(), RingDiameter, *RingOffset.ToCompactString(),
+	UE_LOG( LogFlyingTrucks, Log, TEXT( "%s: scale %s vs truck; ring %.0f at %s, wings x%.2f at %s" ),
+		*GetOwner()->GetName(), *S.ToCompactString(), RingDiameter, *RingOffset.ToCompactString(),
 		WingScale, *WingPivot.ToCompactString() );
 }
 
@@ -950,8 +983,7 @@ void UFlyingTruckComponent::CreateWings()
 	const float Span = Bounds.BoxExtent.Y * 2.f * WingScale;
 	WingPlateThickness = Bounds.BoxExtent.Z * 2.f * WingScale;
 	// Folding swings the tip in until the leading edge lies along the truck, plus a little extra.
-	WingFoldYaw = WingFoldYawOverride > 0.f ? WingFoldYawOverride
-		: FMath::RadiansToDegrees( FMath::Atan2( Span, FMath::Max( Chord, 1.f ) ) ) + WingExtraFoldDegrees;
+	WingFoldYaw = WingFoldYawFor( Bounds, WingScale, WingFoldYawOverride, WingExtraFoldDegrees );
 	WingLeadingEdgeLength = FMath::Sqrt( Chord * Chord + Span * Span );
 	WingLeadingEdgeDir = FVector( -Chord, Span, 0.f ).GetSafeNormal();
 
@@ -1174,6 +1206,87 @@ void UFlyingTruckComponent::CreateBodyParts()
 		}
 		Comp->RegisterComponent();
 		BodyPartComponents.Add( Comp );
+	}
+}
+
+const UFlyingTruckComponent* UFlyingTruckComponent::FindTemplate( const UClass* VehicleClass )
+{
+	for( const UClass* Class = VehicleClass; Class; Class = Class->GetSuperClass() )
+	{
+		const UBlueprintGeneratedClass* BPClass = Cast< UBlueprintGeneratedClass >( Class );
+		if( !BPClass || !BPClass->SimpleConstructionScript )
+		{
+			continue;
+		}
+		for( const USCS_Node* Node : BPClass->SimpleConstructionScript->GetAllNodes() )
+		{
+			if( const UFlyingTruckComponent* Template = Node ? Cast< UFlyingTruckComponent >( Node->ComponentTemplate ) : nullptr )
+			{
+				return Template;
+			}
+		}
+	}
+	return nullptr;
+}
+
+void UFlyingTruckComponent::GetParkedVisuals( const AActor* Vehicle, TArray< FFlyingParkedVisual >& OutVisuals ) const
+{
+	for( const FFlyingBodyPart& Part : BodyParts )
+	{
+		if( UStaticMesh* Mesh = Part.Mesh.LoadSynchronous() )
+		{
+			OutVisuals.Add( { Mesh, FTransform( Part.Rotation, Part.Location, Part.Scale ) } );
+		}
+	}
+
+	// The same fitting BeginPlay applies, on copies.
+	float FitRingDiameter = RingDiameter, FitWingScale = WingScale;
+	FVector FitRingOffset = RingOffset, FitWingPivot = WingPivot;
+	FVector OwnC, RefC, S;
+	if( bScaleToVehicle && !ReferenceVehicle.IsNull() && ComputeVehicleFit( Vehicle, ReferenceVehicle, OwnC, RefC, S ) )
+	{
+		auto Map = [&]( const FVector& P ) { return OwnC + ( P - RefC ) * S; };
+		FitRingDiameter *= S.Y;
+		FitRingOffset = Map( FitRingOffset );
+		if( bFitWings )
+		{
+			FitWingPivot = Map( FitWingPivot );
+			FitWingScale *= FMath::Min( S.X, S.Y );
+		}
+	}
+	FitWingScale *= WingScaleAdjust;
+	FitWingPivot += WingPivotAdjust;
+
+	if( bFlightRing && bRingAlwaysVisible )
+	{
+		if( UStaticMesh* Mesh = RingMesh.LoadSynchronous() )
+		{
+			const float MeshDiameter = Mesh->GetBounds().BoxExtent.X * 2.f;
+			const float Scale = MeshDiameter > KINDA_SMALL_NUMBER ? FitRingDiameter / MeshDiameter : 1.f;
+			OutVisuals.Add( { Mesh, FTransform( FRotator::ZeroRotator, FitRingOffset, FVector( Scale ) ) } );
+		}
+	}
+
+	if( bFlightWings )
+	{
+		if( UStaticMesh* Mesh = WingMesh.LoadSynchronous() )
+		{
+			// Folded: every plate stacked at the pivot, swung in (matches UpdateWings at deploy 0).
+			const FBoxSphereBounds Bounds = Mesh->GetBounds();
+			const float SignX = Bounds.Origin.X <= 0.f ? 1.f : -1.f;
+			const float SignY = Bounds.Origin.Y >= 0.f ? 1.f : -1.f;
+			const float Thickness = Bounds.BoxExtent.Z * 2.f * FitWingScale;
+			const float Yaw = WingFoldYawFor( Bounds, FitWingScale, WingFoldYawOverride, WingExtraFoldDegrees );
+			const int32 Plates = FMath::Clamp( WingPlateCount, 1, 6 );
+			for( float Side : { 1.f, -1.f } )
+			{
+				for( int32 Index = 0; Index < Plates; ++Index )
+				{
+					const FVector Pivot( FitWingPivot.X, FitWingPivot.Y * Side, FitWingPivot.Z - Index * Thickness * 1.05f );
+					OutVisuals.Add( { Mesh, FTransform( FRotator( 0.f, Yaw * Side, 0.f ), Pivot, FVector( SignX, SignY * Side, 1.f ) * FitWingScale ) } );
+				}
+			}
+		}
 	}
 }
 

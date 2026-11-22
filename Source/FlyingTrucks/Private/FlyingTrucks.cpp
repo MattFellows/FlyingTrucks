@@ -1,6 +1,7 @@
 // FlyingTrucks - a flyable variant of the Satisfactory truck.
 
 #include "FlyingTrucks.h"
+#include "FlyingVehicleHologram.h"
 
 DEFINE_LOG_CATEGORY(LogFlyingTrucks);
 
@@ -9,6 +10,7 @@ DEFINE_LOG_CATEGORY(LogFlyingTrucks);
 void FFlyingTrucksModule::StartupModule()
 {
 	UE_LOG(LogFlyingTrucks, Display, TEXT("FlyingTrucks module started"));
+	FlyingTrucks_RegisterHologramHook();
 }
 
 void FFlyingTrucksModule::ShutdownModule()

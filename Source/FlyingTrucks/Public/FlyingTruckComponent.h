@@ -23,6 +23,13 @@ struct FInputActionValue;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam( FOnFlightModeChanged, bool, bIsFlying );
 
+/** One of a vehicle's own meshes as it looks parked, relative to the vehicle's root (used for its build hologram). */
+struct FFlyingParkedVisual
+{
+	UStaticMesh* Mesh = nullptr;
+	FTransform Transform;
+};
+
 /** The driver's flight controls, sent from the driving client to the server. */
 USTRUCT()
 struct FFlyingTruckInput
@@ -120,6 +127,16 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay( const EEndPlayReason::Type EndPlayReason ) override;
 	virtual void TickComponent( float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction ) override;
+
+	/** The flight component a vehicle class is built with (its Blueprint template), or null. */
+	static const UFlyingTruckComponent* FindTemplate( const UClass* VehicleClass );
+	/** True for vehicles that replace the base vehicle's look with their own BodyParts (M-Bot). */
+	bool ReplacesVehicleMesh() const { return bHideVehicleMesh; }
+	/**
+	 * This vehicle's own meshes as they look on the ground: body parts, folded wings and the ring.
+	 * Works on a template, measuring against the given vehicle (e.g. the class default object).
+	 */
+	void GetParkedVisuals( const AActor* Vehicle, TArray< FFlyingParkedVisual >& OutVisuals ) const;
 	virtual void GetLifetimeReplicatedProps( TArray< FLifetimeProperty >& OutLifetimeProps ) const override;
 
 	UFUNCTION( BlueprintPure, Category = "Flight" )
