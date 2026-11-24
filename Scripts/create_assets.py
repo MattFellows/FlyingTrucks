@@ -590,11 +590,33 @@ for part, mat, color, glow in (("Hull", hull_mat, unreal.LinearColor(0.02, 0.02,
         bp_part.set_editor_property("idle_color", unreal.LinearColor(0.03, 0.03, 0.035, 1.0))
     parts.append(bp_part)
 
+# Combat: a sphere (radius 100 cm, also the bolt shape) and a see-through shield material, brightest at its rim.
+import combat_assets
+COMBAT_DIR = ROOT + "/Combat"
+combat_assets.build(COMBAT_DIR, source_dir, asset_tools, eal, save, log)
+
+
+def add_combat_component(bp):
+    handles = sds.k2_gather_subobject_data_for_blueprint(bp)
+    for h in handles:
+        obj = unreal.SubobjectDataBlueprintFunctionLibrary.get_associated_object(unreal.SubobjectDataBlueprintFunctionLibrary.get_data(h))
+        if obj is not None and isinstance(obj, unreal.FlyingCombatComponent):
+            return
+    params = unreal.AddNewSubobjectParams(parent_handle=handles[0], new_class=unreal.FlyingCombatComponent, blueprint_context=bp)
+    new_handle, fail_reason = sds.add_new_subobject(params)
+    if not fail_reason.is_empty():
+        raise RuntimeError("add_new_subobject failed: " + str(fail_reason))
+    sds.rename_subobject(new_handle, unreal.Text("FlyingCombat"))
+    log("Added FlyingCombatComponent to " + bp.get_name())
+
+
 mbot_desc_text = ("A sleek black starfighter that hovers on its acclivity ring. Press F (Y on gamepad) to lift off; "
                   "while hovering Space/A rises and C, Ctrl/B sinks, and once moving it flies like the Flying Truck. "
+                  "Left mouse (RB on gamepad) fires its particle guns, and its energy shield charges up slowly in flight. "
                   "Burns one Acclivity Stone per minute of flight from its cargo or your inventory.")
 bp_mbot = make_blueprint("BP_MBot", load_cls(VEH_DIR + "Explorer/BP_Explorer.BP_Explorer_C"), MBOT_DIR)
 add_flight_component(bp_mbot)
+add_combat_component(bp_mbot)
 compile_bp(bp_mbot)
 mt = flight_template(bp_mbot)
 mt.set_editor_property("hide_vehicle_mesh", True)

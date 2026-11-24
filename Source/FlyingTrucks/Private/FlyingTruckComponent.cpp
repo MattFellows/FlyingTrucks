@@ -3,6 +3,7 @@
 #include "FlyingTruckComponent.h"
 
 #include "FlyingTrucks.h"
+#include "FlyingCombatComponent.h"
 #include "ChaosVehicleMovementComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/PointLightComponent.h"
@@ -56,6 +57,8 @@ void UFlyingTruckComponent::GetLifetimeReplicatedProps( TArray< FLifetimePropert
 void UFlyingTruckComponent::BeginPlay()
 {
 	Super::BeginPlay();
+
+	Combat = GetOwner()->FindComponentByClass< UFlyingCombatComponent >();
 
 	VehicleMovement = GetOwner()->FindComponentByClass< UChaosVehicleMovementComponent >();
 	if( !VehicleMovement )
@@ -181,6 +184,12 @@ void UFlyingTruckComponent::CreateInputObjects()
 	FlightContext->MapKey( PitchDownAction, EKeys::LeftControl );
 	FlightContext->MapKey( PitchDownAction, EKeys::C );                         // matches the game's "down" habit
 	FlightContext->MapKey( PitchDownAction, EKeys::Gamepad_FaceButton_Right );  // B
+	FireAction = NewObject< UInputAction >( this, TEXT( "IA_FlyingTruck_Fire" ) );
+	if( Combat )
+	{
+		FlightContext->MapKey( FireAction, EKeys::LeftMouseButton );
+		FlightContext->MapKey( FireAction, EKeys::Gamepad_RightShoulder );      // RB / R1
+	}
 }
 
 void UFlyingTruckComponent::BindToController( APlayerController* PlayerController )
@@ -218,6 +227,9 @@ void UFlyingTruckComponent::BindToController( APlayerController* PlayerControlle
 		FlightInputComponent->BindAction( PitchUpAction, ETriggerEvent::Completed, this, &UFlyingTruckComponent::Input_PitchUpReleased );
 		FlightInputComponent->BindAction( PitchDownAction, ETriggerEvent::Started, this, &UFlyingTruckComponent::Input_PitchDownPressed );
 		FlightInputComponent->BindAction( PitchDownAction, ETriggerEvent::Completed, this, &UFlyingTruckComponent::Input_PitchDownReleased );
+		FlightInputComponent->BindAction( FireAction, ETriggerEvent::Started, this, &UFlyingTruckComponent::Input_FirePressed );
+		FlightInputComponent->BindAction( FireAction, ETriggerEvent::Completed, this, &UFlyingTruckComponent::Input_FireReleased );
+		FlightInputComponent->BindAction( FireAction, ETriggerEvent::Canceled, this, &UFlyingTruckComponent::Input_FireReleased );
 	}
 
 	BoundController = PlayerController;
@@ -275,7 +287,27 @@ void UFlyingTruckComponent::UpdateFlightContext()
 void UFlyingTruckComponent::ResetFlightInputs()
 {
 	bPitchUpHeld = bPitchDownHeld = false;
+	if( Combat )
+	{
+		Combat->SetFiring( false );
+	}
 	ThrottleInput = BrakeInput = SteerLeftInput = SteerRightInput = SteerAxisInput = 0.f;
+}
+
+void UFlyingTruckComponent::Input_FirePressed( const FInputActionValue& Value )
+{
+	if( Combat && bIsFlying )
+	{
+		Combat->SetFiring( true );
+	}
+}
+
+void UFlyingTruckComponent::Input_FireReleased( const FInputActionValue& Value )
+{
+	if( Combat )
+	{
+		Combat->SetFiring( false );
+	}
 }
 
 void UFlyingTruckComponent::Input_Throttle( const FInputActionValue& Value ) { ThrottleInput = FMath::Clamp( Value.Get< float >(), 0.f, 1.f ); }
@@ -317,6 +349,11 @@ void UFlyingTruckComponent::SetFlying( bool bNewFlying )
 		// Only the server can see the cargo, so it decides whether we may take off; flight mode
 		// switches on here when its answer replicates back.
 		Server_SetFlying( true );
+		return;
+	}
+	if( bNewFlying && Combat && Combat->IsKnockedOut() )
+	{
+		NotifyDriver( LOCTEXT( "EnginesOut", "Engines are still out." ) );
 		return;
 	}
 	if( bNewFlying && FuelItemClass && GetFuelCount() <= 0 )
@@ -1103,7 +1140,8 @@ void UFlyingTruckComponent::HideVehicleMeshes()
 	GetOwner()->GetComponents< UMeshComponent >( Meshes );
 	for( UMeshComponent* Mesh : Meshes )
 	{
-		const bool bOurs = Mesh == RingComponent || WingPlates.Contains( Mesh ) || BodyPartComponents.Contains( Mesh );
+		const bool bOurs = Mesh == RingComponent || WingPlates.Contains( Mesh ) || BodyPartComponents.Contains( Mesh )
+			|| Mesh->ComponentHasTag( UFlyingCombatComponent::MeshTag );
 		if( !bOurs && !Mesh->bHiddenInGame )
 		{
 			// Hidden only: the base vehicle's physics body and wheels keep working.

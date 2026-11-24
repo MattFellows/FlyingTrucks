@@ -137,6 +137,8 @@ public:
 	 * Works on a template, measuring against the given vehicle (e.g. the class default object).
 	 */
 	void GetParkedVisuals( const AActor* Vehicle, TArray< FFlyingParkedVisual >& OutVisuals ) const;
+	/** Shows a chat line to whoever is driving (locally, or via a client RPC). */
+	void NotifyDriver( const FText& Message );
 	virtual void GetLifetimeReplicatedProps( TArray< FLifetimeProperty >& OutLifetimeProps ) const override;
 
 	UFUNCTION( BlueprintPure, Category = "Flight" )
@@ -408,6 +410,9 @@ protected:
 	void Input_PitchDownPressed( const FInputActionValue& Value ) { bPitchDownHeld = true; }
 	void Input_PitchDownReleased( const FInputActionValue& Value ) { bPitchDownHeld = false; }
 
+	void Input_FirePressed( const FInputActionValue& Value );
+	void Input_FireReleased( const FInputActionValue& Value );
+
 	bool IsAirborne( const UPrimitiveComponent* Body ) const;
 
 	void CreateGlowLights();
@@ -452,8 +457,6 @@ protected:
 	void FitToVehicle();
 	/** Server: burn fuel while flying, land when it runs out. */
 	void TickFuel( float DeltaTime );
-	/** Shows a chat line to whoever is driving (locally, or via a client RPC). */
-	void NotifyDriver( const FText& Message );
 	/** Adds a local system chat line on this machine. */
 	void ShowLocalMessage( const FText& Message ) const;
 
@@ -569,6 +572,13 @@ private:
 
 	UPROPERTY( Transient )
 	TObjectPtr< UInputAction > SteerAxisAction;
+
+	/** Mapped only on vehicles with a combat component. */
+	UPROPERTY( Transient )
+	TObjectPtr< UInputAction > FireAction;
+
+	UPROPERTY( Transient )
+	TObjectPtr< class UFlyingCombatComponent > Combat;
 
 	/** Always active while driving: flight toggle. */
 	UPROPERTY( Transient )

@@ -2,6 +2,7 @@
 
 #include "FlyingTrucks.h"
 #include "FlyingVehicleHologram.h"
+#include "FlyingCombatComponent.h"
 
 DEFINE_LOG_CATEGORY(LogFlyingTrucks);
 
@@ -11,6 +12,7 @@ void FFlyingTrucksModule::StartupModule()
 {
 	UE_LOG(LogFlyingTrucks, Display, TEXT("FlyingTrucks module started"));
 	FlyingTrucks_RegisterHologramHook();
+	FlyingTrucks_RegisterShieldHook();
 }
 
 void FFlyingTrucksModule::ShutdownModule()
