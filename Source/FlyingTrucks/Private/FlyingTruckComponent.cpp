@@ -92,6 +92,7 @@ void UFlyingTruckComponent::BeginPlay()
 	FitToVehicle();
 	WingScale *= WingScaleAdjust;
 	WingPivot += WingPivotAdjust;
+	RingOffset += RingOffsetAdjust;
 	CreateBodyParts();
 	CreateGlowLights();
 	CreateRing();
@@ -499,6 +500,7 @@ void UFlyingTruckComponent::FitToVehicle()
 
 	RingDiameter *= S.Y;
 	RingOffset = Map( RingOffset );
+	FitScaleZ = S.Z;
 	GlowOffset = Map( GlowOffset );
 	GlowRadius *= S.GetMax();
 	if( bFitWings )
@@ -1007,6 +1009,76 @@ void UFlyingTruckComponent::CreateRing()
 	RingGlowAlpha = -1.f; // force the first UpdateRing to set the colour
 	RingComponent->SetVisibility( bRingAlwaysVisible );
 	RingComponent->RegisterComponent();
+	CreateRingMounts();
+}
+
+void UFlyingTruckComponent::CreateRingMounts()
+{
+	if( !bRingMounts || !RingComponent )
+	{
+		return;
+	}
+	TArray< FFlyingParkedVisual > Mounts;
+	GetRingMountVisuals( RingDiameter, RingOffset, FitScaleZ, Mounts );
+	UMaterialInterface* Material = RingMountMaterial.LoadSynchronous();
+	for( const FFlyingParkedVisual& Mount : Mounts )
+	{
+		UStaticMeshComponent* Comp = NewObject< UStaticMeshComponent >( GetOwner() );
+		Comp->SetupAttachment( GetOwner()->GetRootComponent() );
+		Comp->SetStaticMesh( Mount.Mesh );
+		Comp->SetCollisionEnabled( ECollisionEnabled::NoCollision );
+		Comp->SetCanEverAffectNavigation( false );
+		Comp->SetRelativeTransform( Mount.Transform );
+		if( Material )
+		{
+			Comp->SetMaterial( 0, Material );
+		}
+		if( UMaterialInstanceDynamic* MID = Comp->CreateDynamicMaterialInstance( 0 ) )
+		{
+			MID->SetVectorParameterValue( TEXT( "Color" ), RingMountColor );
+		}
+		Comp->RegisterComponent();
+		RingMountComponents.Add( Comp );
+	}
+}
+
+void UFlyingTruckComponent::GetRingMountVisuals( float Diameter, const FVector& Offset, float ScaleZ, TArray< FFlyingParkedVisual >& OutVisuals ) const
+{
+	UStaticMesh* Ring = RingMesh.LoadSynchronous();
+	UStaticMesh* Collar = RingCollarMesh.LoadSynchronous();
+	UStaticMesh* Strut = RingStrutMesh.LoadSynchronous();
+	if( !bRingMounts || !Ring || !Collar || !Strut )
+	{
+		return;
+	}
+	// The ring torus: its tube radius is its Z extent; its centre line runs at (outer radius - tube radius).
+	const FVector RingExt = Ring->GetBounds().BoxExtent;
+	const float RingScale = RingExt.X > KINDA_SMALL_NUMBER ? Diameter / ( RingExt.X * 2.f ) : 1.f;
+	const float Tube = RingExt.Z * RingScale;
+	const float CentreLine = ( RingExt.X - RingExt.Z ) * RingScale;
+	// Collar: fat torus whose hole (outer radius minus its own tube diameter) sits just round the ring's tube.
+	const FVector CollarExt = Collar->GetBounds().BoxExtent;
+	const float Hole = FMath::Max( CollarExt.X - 2.f * CollarExt.Z, 1.f );
+	const float CollarScale = 1.1f * Tube / Hole;
+	const float CollarOuter = CollarExt.X * CollarScale;
+	const float StrutTop = RingStrutHeight >= 0.f ? RingStrutHeight : 100.f * ScaleZ;
+	const float StrutRadius = 0.14f * Tube;
+
+	for( int32 i = 0; i < 4; ++i )
+	{
+		const float Angle = HALF_PI * i;
+		const FVector Dir( FMath::Cos( Angle ), FMath::Sin( Angle ), 0.f );
+		const FVector Point = Offset + Dir * CentreLine;
+		const FVector Tangent( -Dir.Y, Dir.X, 0.f );
+		// The collar's axis (its Z) runs along the ring; a little longer along it, like a sleeve.
+		OutVisuals.Add( { Collar, FTransform( FRotationMatrix::MakeFromZX( Tangent, Dir ).Rotator(), Point, FVector( CollarScale, CollarScale, CollarScale * 1.3f ) ) } );
+		const float Bottom = CollarOuter * 0.8f;
+		if( StrutTop > Bottom )
+		{
+			OutVisuals.Add( { Strut, FTransform( FRotator::ZeroRotator, Point + FVector( 0.f, 0.f, Bottom ),
+				FVector( StrutRadius / 100.f, StrutRadius / 100.f, ( StrutTop - Bottom ) / 100.f ) ) } );
+		}
+	}
 }
 
 void UFlyingTruckComponent::CreateWings()
@@ -1152,7 +1224,7 @@ void UFlyingTruckComponent::HideVehicleMeshes()
 	GetOwner()->GetComponents< UMeshComponent >( Meshes );
 	for( UMeshComponent* Mesh : Meshes )
 	{
-		const bool bOurs = Mesh == RingComponent || WingPlates.Contains( Mesh ) || BodyPartComponents.Contains( Mesh )
+		const bool bOurs = Mesh == RingComponent || WingPlates.Contains( Mesh ) || BodyPartComponents.Contains( Mesh ) || RingMountComponents.Contains( Mesh )
 			|| Mesh->ComponentHasTag( UFlyingCombatComponent::MeshTag );
 		if( !bOurs && !Mesh->bHiddenInGame )
 		{
@@ -1292,12 +1364,14 @@ void UFlyingTruckComponent::GetParkedVisuals( const AActor* Vehicle, TArray< FFl
 	// The same fitting BeginPlay applies, on copies.
 	float FitRingDiameter = RingDiameter, FitWingScale = WingScale;
 	FVector FitRingOffset = RingOffset, FitWingPivot = WingPivot;
+	float FitZ = 1.f;
 	FVector OwnC, RefC, S;
 	if( bScaleToVehicle && !ReferenceVehicle.IsNull() && ComputeVehicleFit( Vehicle, ReferenceVehicle, OwnC, RefC, S ) )
 	{
 		auto Map = [&]( const FVector& P ) { return OwnC + ( P - RefC ) * S; };
 		FitRingDiameter *= S.Y;
 		FitRingOffset = Map( FitRingOffset );
+		FitZ = S.Z;
 		if( bFitWings )
 		{
 			FitWingPivot = Map( FitWingPivot );
@@ -1306,6 +1380,7 @@ void UFlyingTruckComponent::GetParkedVisuals( const AActor* Vehicle, TArray< FFl
 	}
 	FitWingScale *= WingScaleAdjust;
 	FitWingPivot += WingPivotAdjust;
+	FitRingOffset += RingOffsetAdjust;
 
 	if( bFlightRing && bRingAlwaysVisible )
 	{
@@ -1315,6 +1390,7 @@ void UFlyingTruckComponent::GetParkedVisuals( const AActor* Vehicle, TArray< FFl
 			const float Scale = MeshDiameter > KINDA_SMALL_NUMBER ? FitRingDiameter / MeshDiameter : 1.f;
 			OutVisuals.Add( { Mesh, FTransform( FRotator::ZeroRotator, FitRingOffset, FVector( Scale ) ) } );
 		}
+		GetRingMountVisuals( FitRingDiameter, FitRingOffset, FitZ, OutVisuals );
 	}
 
 	if( bFlightWings )

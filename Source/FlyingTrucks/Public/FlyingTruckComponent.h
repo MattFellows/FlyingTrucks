@@ -267,6 +267,29 @@ public:
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
 	float RingFadeSeconds = 0.6f;
 
+	/** Mount the ring to the body: a collar round it at the front, back and both sides, each with a strut up into the vehicle. The ring spins through the collars. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
+	bool bRingMounts = true;
+
+	/** Fat torus around Z; its hole has to fit round the ring's tube. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
+	TSoftObjectPtr< UStaticMesh > RingCollarMesh = TSoftObjectPtr< UStaticMesh >( FSoftObjectPath( TEXT( "/Skyward/Ring/SM_RingCollar.SM_RingCollar" ) ) );
+
+	/** Cylinder of radius 100 from z = 0 to 100. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
+	TSoftObjectPtr< UStaticMesh > RingStrutMesh = TSoftObjectPtr< UStaticMesh >( FSoftObjectPath( TEXT( "/Skyward/Ring/SM_RingStrut.SM_RingStrut" ) ) );
+
+	/** Needs a "Color" parameter. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
+	TSoftObjectPtr< class UMaterialInterface > RingMountMaterial = TSoftObjectPtr< class UMaterialInterface >( FSoftObjectPath( TEXT( "/Skyward/MBot/M_MBotHull.M_MBotHull" ) ) );
+
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
+	FLinearColor RingMountColor = FLinearColor( 0.05f, 0.05f, 0.055f );
+
+	/** How far above the ring's centre the struts reach, cm (vehicle-local, after fitting). < 0: 100 cm, scaled to the vehicle's height. */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Ring" )
+	float RingStrutHeight = -1.f;
+
 	/** Delta wings that swing out of the truck's sides in flight mode. */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Wings" )
 	bool bFlightWings = true;
@@ -323,6 +346,10 @@ public:
 
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Fit" )
 	FVector WingPivotAdjust = FVector::ZeroVector;
+
+	/** Moves the ring after fitting (e.g. the Poco's sits further back). */
+	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Fit" )
+	FVector RingOffsetAdjust = FVector::ZeroVector;
 
 	/** Hide the base vehicle's own meshes (for vehicles that bring their own BodyParts, like M-Bot). */
 	UPROPERTY( EditAnywhere, BlueprintReadWrite, Category = "Body" )
@@ -418,6 +445,9 @@ protected:
 
 	void CreateGlowLights();
 	void CreateRing();
+	void CreateRingMounts();
+	/** Collars and struts for a ring of this size and place. */
+	void GetRingMountVisuals( float Diameter, const FVector& Offset, float ScaleZ, TArray< FFlyingParkedVisual >& OutVisuals ) const;
 	void UpdateGlow();
 	void CreateWings();
 	void UpdateWings( float DeltaTime );
@@ -543,6 +573,12 @@ private:
 	float WingDeployAlpha = 0.f;
 	/** Yaw that folds the right wing in (left uses the negative); from the mesh's shape. */
 	float WingFoldYaw = 0.f;
+
+	/** Vehicle height relative to the reference (Truck), from fitting. */
+	float FitScaleZ = 1.f;
+
+	UPROPERTY( Transient )
+	TArray< TObjectPtr< UStaticMeshComponent > > RingMountComponents;
 
 	UPROPERTY( Transient )
 	TObjectPtr< UEnhancedInputComponent > FlightInputComponent;

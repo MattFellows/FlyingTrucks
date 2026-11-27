@@ -47,8 +47,17 @@ def _scene():
     return out
 
 
-def render_icon(path, size=256, supersample=2, yaw_deg=-35.0, pitch_deg=50.0):
-    tris = _scene()
+def scene_from_parts(parts, styles):
+    """[(triangle, colour, emissive)] from {name: Mesh} and {name: (colour, emissive)}."""
+    out = []
+    for name, (colour, emissive) in styles.items():
+        for pts, _ in parts[name].tris:
+            out.append((pts, colour, emissive))
+    return out
+
+
+def render_icon(path, size=256, supersample=2, yaw_deg=-35.0, pitch_deg=50.0, tris=None):
+    tris = tris if tris is not None else _scene()
     # Camera: turn the ship so its nose points to the upper right, then look down on it.
     cy, sy = math.cos(math.radians(yaw_deg)), math.sin(math.radians(yaw_deg))
     cp, sp = math.cos(math.radians(pitch_deg)), math.sin(math.radians(pitch_deg))
