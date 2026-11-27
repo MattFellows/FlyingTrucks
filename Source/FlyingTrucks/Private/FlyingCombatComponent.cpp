@@ -19,6 +19,16 @@
 #include "Net/UnrealNetwork.h"
 #include "Patching/NativeHookManager.h"
 #include "UObject/UObjectIterator.h"
+#include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
+#include "Styling/CoreStyle.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/Images/SImage.h"
+#include "Widgets/Layout/SBorder.h"
+#include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SDPIScaler.h"
+#include "Widgets/SOverlay.h"
+#include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "FlyingTrucks"
 
@@ -59,6 +69,9 @@ void UFlyingCombatComponent::GetLifetimeReplicatedProps( TArray< FLifetimeProper
 {
 	Super::GetLifetimeReplicatedProps( OutLifetimeProps );
 	DOREPLIFETIME( UFlyingCombatComponent, ShieldLevel );
+	DOREPLIFETIME( UFlyingCombatComponent, HullLevel );
+	DOREPLIFETIME( UFlyingCombatComponent, ReigniteLevel );
+	DOREPLIFETIME( UFlyingCombatComponent, bShieldDown );
 }
 
 void UFlyingCombatComponent::BeginPlay()
@@ -69,6 +82,11 @@ void UFlyingCombatComponent::BeginPlay()
 	if( !BoltDamageType )
 	{
 		BoltDamageType = UFGPointDamageType::StaticClass();
+	}
+	if( GetOwner()->HasAuthority() )
+	{
+		SetShield( ShieldMax );
+		SetHull( HullMax );
 	}
 	if( GetNetMode() == NM_DedicatedServer )
 	{
@@ -83,6 +101,18 @@ void UFlyingCombatComponent::BeginPlay()
 		ShieldMID = ShieldComponent->CreateDynamicMaterialInstance( 0 );
 		ShieldComponent->SetVisibility( false );
 		ShieldComponent->RegisterComponent();
+	}
+
+	WaveComponent = MakeCombatMesh( GetOwner(), ShieldMesh.LoadSynchronous(), ShieldMaterial.LoadSynchronous() );
+	if( WaveComponent )
+	{
+		// The IMP's expanding bubble; stays where it was set off.
+		WaveComponent->SetUsingAbsoluteLocation( true );
+		WaveComponent->SetUsingAbsoluteRotation( true );
+		WaveComponent->SetUsingAbsoluteScale( true );
+		WaveMID = WaveComponent->CreateDynamicMaterialInstance( 0 );
+		WaveComponent->SetVisibility( false );
+		WaveComponent->RegisterComponent();
 	}
 
 	UStaticMesh* Ring = ReticleMesh.LoadSynchronous();
@@ -106,6 +136,7 @@ void UFlyingCombatComponent::BeginPlay()
 void UFlyingCombatComponent::EndPlay( const EEndPlayReason::Type EndPlayReason )
 {
 	Bolts.Reset();
+	RemoveHud();
 	Super::EndPlay( EndPlayReason );
 }
 
@@ -114,9 +145,11 @@ bool UFlyingCombatComponent::IsFlying() const
 	return Flight && Flight->IsFlying();
 }
 
-bool UFlyingCombatComponent::IsKnockedOut() const
+bool UFlyingCombatComponent::IsLocalPilotFlying() const
 {
-	return GetWorld()->GetTimeSeconds() < KnockedOutUntil;
+	const APawn* Pawn = Cast< APawn >( GetOwner() );
+	const APlayerController* PC = Pawn ? Cast< APlayerController >( Pawn->GetController() ) : nullptr;
+	return IsFlying() && PC && PC->IsLocalController();
 }
 
 void UFlyingCombatComponent::SetFiring( bool bNewFiring )
@@ -155,7 +188,10 @@ void UFlyingCombatComponent::TickComponent( float DeltaTime, ELevelTick TickType
 			bFiring = false;
 		}
 		ShotTimer = FMath::Max( 0.f, ShotTimer - DeltaTime );
-		if( bFiring && ShotTimer <= 0.f )
+		UpdateReignite( DeltaTime );
+		UpdateHull( DeltaTime );
+		// Hovering with the shield down, the trigger re-ignites it instead.
+		if( bFiring && ShotTimer <= 0.f && ReigniteProgress <= 0.f )
 		{
 			ShotTimer = 1.f / FMath::Max( ShotsPerSecond, 0.1f );
 			FireOnce();
@@ -164,6 +200,8 @@ void UFlyingCombatComponent::TickComponent( float DeltaTime, ELevelTick TickType
 	UpdateBolts( DeltaTime );
 	UpdateShield( DeltaTime );
 	UpdateReticle();
+	UpdateIMPWave( DeltaTime );
+	UpdateHud();
 }
 
 FVector UFlyingCombatComponent::AimDirection( const FVector& Start ) const
@@ -432,34 +470,282 @@ void UFlyingCombatComponent::OnRep_ShieldLevel( uint8 OldLevel )
 
 bool UFlyingCombatComponent::AbsorbDamage( float Damage )
 {
-	if( Damage <= 0.f || Damage >= ShieldMaxAbsorb || ShieldCharge <= 0.f || !IsFlying() )
+	if( Damage <= 0.f || Damage >= ShieldMaxAbsorb || !IsFlying() )
 	{
-		return false;
+		return false; // parked ships can't be hurt
 	}
 	LastHitTime = GetWorld()->GetTimeSeconds();
-	SetShield( ShieldCharge - Damage );
-	if( ShieldCharge <= 0.f )
+	if( ShieldCharge > 0.f )
 	{
-		Flight->NotifyDriver( LOCTEXT( "ShieldDown", "Shield down!" ) );
+		if( Damage >= ShieldCharge )
+		{
+			DropShield();
+		}
+		else
+		{
+			SetShield( ShieldCharge - Damage );
+		}
+		return true;
+	}
+	SetHull( HullCharge - Damage );
+	if( HullCharge <= 0.f )
+	{
+		bGrounded = true;
+		Flight->NotifyDriver( LOCTEXT( "HullGone", "Hull critical - engines shut down! The ship repairs itself while flight mode is off." ) );
+		Flight->SetFlying( false );
 	}
 	return true;
 }
 
 void UFlyingCombatComponent::TakeBoltHit( float Damage )
 {
-	if( !IsFlying() || IsKnockedOut() || AbsorbDamage( Damage ) )
+	AbsorbDamage( Damage );
+}
+
+void UFlyingCombatComponent::DropShield()
+{
+	if( bShieldDown )
 	{
-		return; // parked and knocked-out ships can't be hurt
+		return;
 	}
-	LastHitTime = GetWorld()->GetTimeSeconds();
-	KnockedOutUntil = LastHitTime + KnockoutSeconds;
-	Flight->NotifyDriver( FText::Format( LOCTEXT( "KnockedOut", "Hit! Engines out for {0} seconds." ), FText::AsNumber( FMath::CeilToInt( KnockoutSeconds ) ) ) );
-	Flight->SetFlying( false );
+	bShieldDown = true;
+	ReigniteProgress = 0.f;
+	SetShield( 0.f );
+	Flight->NotifyDriver( FText::Format( LOCTEXT( "ShieldDownReignite", "Shield down! Hover and hold fire for {0} seconds to re-ignite it." ),
+		FText::AsNumber( FMath::CeilToInt( ReigniteSeconds ) ) ) );
+}
+
+void UFlyingCombatComponent::SetHull( float NewHull )
+{
+	HullCharge = FMath::Clamp( NewHull, 0.f, HullMax );
+	HullLevel = uint8( FMath::Clamp( FMath::CeilToInt( HullCharge / FMath::Max( HullMax, 1.f ) * 255.f ), 0, 255 ) );
+}
+
+void UFlyingCombatComponent::UpdateReignite( float DeltaTime )
+{
+	const bool bHovering = IsFlying() && GetOwner()->GetVelocity().Size() <= ReigniteMaxSpeed;
+	if( bShieldDown && bFiring && bHovering )
+	{
+		ReigniteProgress += DeltaTime;
+		if( ReigniteProgress >= ReigniteSeconds )
+		{
+			ReigniteProgress = 0.f;
+			bShieldDown = false;
+			bFiring = false; // so it doesn't start shooting; the pilot presses again
+			SetShield( ShieldMax * ReigniteFraction );
+			Flight->NotifyDriver( LOCTEXT( "ShieldBack", "Shield re-ignited." ) );
+		}
+	}
+	else
+	{
+		ReigniteProgress = 0.f;
+	}
+	ReigniteLevel = uint8( FMath::Clamp( FMath::RoundToInt( ReigniteProgress / FMath::Max( ReigniteSeconds, 0.1f ) * 255.f ), 0, 255 ) );
+}
+
+void UFlyingCombatComponent::UpdateHull( float DeltaTime )
+{
+	if( IsFlying() || HullCharge >= HullMax )
+	{
+		return;
+	}
+	SetHull( HullCharge + HullMax * DeltaTime / FMath::Max( HullRepairSeconds, 0.1f ) );
+	if( bGrounded && HullCharge >= HullMax * HullFlyFraction )
+	{
+		bGrounded = false;
+		Flight->NotifyDriver( LOCTEXT( "HullFlyable", "Hull repaired enough to fly." ) );
+	}
+}
+
+void UFlyingCombatComponent::RequestIMP()
+{
+	if( !IsFlying() )
+	{
+		return;
+	}
+	if( GetOwner()->HasAuthority() )
+	{
+		Server_FireIMP_Implementation();
+	}
+	else
+	{
+		Server_FireIMP();
+	}
+}
+
+void UFlyingCombatComponent::Server_FireIMP_Implementation()
+{
+	const double Now = GetWorld()->GetTimeSeconds();
+	if( !IsFlying() || Now - LastIMPTime < IMPCooldownSeconds )
+	{
+		return;
+	}
+	LastIMPTime = Now;
+	const FVector Center = GetOwner()->GetActorLocation();
+	for( TObjectIterator< UFlyingCombatComponent > It; It; ++It )
+	{
+		if( It->GetWorld() == GetWorld() && It->HasBegunPlay() && It->Flight
+			&& FVector::Dist( It->GetOwner()->GetActorLocation(), Center ) <= IMPRadius )
+		{
+			It->DropShield();
+		}
+	}
+	Multicast_IMP();
+}
+
+void UFlyingCombatComponent::Multicast_IMP_Implementation()
+{
+	LastIMPTime = GetWorld()->GetTimeSeconds(); // for the HUD's cooldown
+	if( WaveComponent )
+	{
+		WaveAge = 0.f;
+		WaveComponent->SetWorldLocation( GetOwner()->GetActorLocation() );
+		WaveComponent->SetWorldScale3D( FVector( 1.f ) );
+		WaveComponent->SetVisibility( true );
+	}
+}
+
+void UFlyingCombatComponent::UpdateIMPWave( float DeltaTime )
+{
+	if( WaveAge < 0.f || !WaveComponent )
+	{
+		return;
+	}
+	WaveAge += DeltaTime;
+	const float T = WaveAge / FMath::Max( IMPWaveSeconds, 0.05f );
+	if( T >= 1.f )
+	{
+		WaveAge = -1.f;
+		WaveComponent->SetVisibility( false );
+		return;
+	}
+	WaveComponent->SetWorldScale3D( FVector( FMath::Max( 1.f, IMPRadius / 100.f * T ) ) );
+	if( WaveMID )
+	{
+		WaveMID->SetVectorParameterValue( TEXT( "Color" ), IMPColor );
+		WaveMID->SetScalarParameterValue( TEXT( "Opacity" ), 0.6f * ( 1.f - T ) );
+	}
+}
+
+void UFlyingCombatComponent::RemoveHud()
+{
+	if( Hud.IsValid() )
+	{
+		if( GEngine && GEngine->GameViewport )
+		{
+			GEngine->GameViewport->RemoveViewportWidgetContent( Hud.ToSharedRef() );
+		}
+		Hud.Reset();
+	}
+}
+
+void UFlyingCombatComponent::UpdateHud()
+{
+	const bool bShow = IsLocalPilotFlying();
+	if( !bShow )
+	{
+		RemoveHud();
+		return;
+	}
+	if( Hud.IsValid() || !GEngine || !GEngine->GameViewport )
+	{
+		return;
+	}
+
+	constexpr float BarWidth = 220.f;
+	TWeakObjectPtr< UFlyingCombatComponent > Weak( this );
+	const FSlateBrush* White = FCoreStyle::Get().GetBrush( "GenericWhiteBox" );
+	const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle( "Bold", 14 );
+
+	// One "NAME 73%" line over a bar.
+	auto MakeRow = [&]( TFunction< FText( const UFlyingCombatComponent& ) > Text, TFunction< float( const UFlyingCombatComponent& ) > Fill,
+		TFunction< FLinearColor( const UFlyingCombatComponent& ) > Color ) -> TSharedRef< SWidget >
+	{
+		return SNew( SVerticalBox )
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew( STextBlock ).Font( Font ).ShadowOffset( FVector2D( 1.0, 1.0 ) )
+				.Text_Lambda( [Weak, Text]() { return Weak.IsValid() ? Text( *Weak ) : FText::GetEmpty(); } )
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding( 0.f, 2.f, 0.f, 6.f )
+			[
+				SNew( SBox ).WidthOverride( BarWidth ).HeightOverride( 8.f )
+				[
+					SNew( SOverlay )
+					+ SOverlay::Slot()
+					[
+						SNew( SImage ).Image( White ).ColorAndOpacity( FLinearColor( 0.f, 0.f, 0.f, 0.5f ) )
+					]
+					+ SOverlay::Slot().HAlign( HAlign_Left )
+					[
+						SNew( SBox )
+						.WidthOverride_Lambda( [Weak, Fill]() { return FOptionalSize( Weak.IsValid() ? BarWidth * FMath::Clamp( Fill( *Weak ), 0.f, 1.f ) : 0.f ); } )
+						[
+							SNew( SImage ).Image( White )
+							.ColorAndOpacity_Lambda( [Weak, Color]() { return FSlateColor( Weak.IsValid() ? Color( *Weak ) : FLinearColor::White ); } )
+						]
+					]
+				]
+			];
+	};
+	// Rounded, but never 0% while there is some left.
+	auto Percent = []( uint8 Level ) { return FText::AsNumber( FMath::Max( Level > 0 ? 1 : 0, FMath::RoundToInt( Level * 100.f / 255.f ) ) ); };
+
+	TSharedRef< SWidget > ShieldRow = MakeRow(
+		[Percent]( const UFlyingCombatComponent& C )
+		{
+			if( C.bShieldDown )
+			{
+				return C.ReigniteLevel > 0
+					? FText::Format( LOCTEXT( "HudReigniting", "SHIELD RE-IGNITING {0}%" ), Percent( C.ReigniteLevel ) )
+					: LOCTEXT( "HudShieldDown", "SHIELD DOWN - hover, hold fire" );
+			}
+			return FText::Format( LOCTEXT( "HudShield", "SHIELD {0}%" ), Percent( C.ShieldLevel ) );
+		},
+		[]( const UFlyingCombatComponent& C ) { return ( C.bShieldDown ? C.ReigniteLevel : C.ShieldLevel ) / 255.f; },
+		[]( const UFlyingCombatComponent& C ) { return C.bShieldDown ? FLinearColor( 1.f, 0.5f, 0.05f ) : C.ShieldFullColor; } );
+	TSharedRef< SWidget > HullRow = MakeRow(
+		[Percent]( const UFlyingCombatComponent& C ) { return FText::Format( LOCTEXT( "HudHull", "HULL {0}%" ), Percent( C.HullLevel ) ); },
+		[]( const UFlyingCombatComponent& C ) { return C.HullLevel / 255.f; },
+		[]( const UFlyingCombatComponent& C ) { return C.HullLevel < 85 ? C.ShieldLowColor : FLinearColor( 0.65f, 0.7f, 0.75f ); } );
+	auto IMPReady = []( const UFlyingCombatComponent& C )
+	{
+		return float( FMath::Clamp( ( C.GetWorld()->GetTimeSeconds() - C.LastIMPTime ) / FMath::Max( C.IMPCooldownSeconds, 0.1f ), 0.0, 1.0 ) );
+	};
+	TSharedRef< SWidget > IMPRow = MakeRow(
+		[IMPReady]( const UFlyingCombatComponent& C ) { return IMPReady( C ) >= 1.f ? LOCTEXT( "HudIMPReady", "IMP READY" ) : LOCTEXT( "HudIMPCharging", "IMP CHARGING" ); },
+		IMPReady,
+		[]( const UFlyingCombatComponent& C ) { return C.IMPColor; } );
+
+	Hud = SNew( SDPIScaler )
+		.Visibility( EVisibility::HitTestInvisible )
+		.DPIScale_Lambda( []()
+		{
+			FVector2D Size( 1920.0, 1080.0 );
+			if( GEngine && GEngine->GameViewport )
+			{
+				GEngine->GameViewport->GetViewportSize( Size );
+			}
+			return FMath::Max( 0.6f, float( Size.Y / 1080.0 ) );
+		} )
+		[
+			SNew( SBox ).HAlign( HAlign_Left ).VAlign( VAlign_Center ).Padding( FMargin( 40.f, 0.f ) )
+			[
+				SNew( SBorder ).BorderImage( White ).BorderBackgroundColor( FLinearColor( 0.f, 0.f, 0.f, 0.35f ) ).Padding( FMargin( 12.f, 10.f, 12.f, 4.f ) )
+				[
+					SNew( SVerticalBox )
+					+ SVerticalBox::Slot().AutoHeight()[ ShieldRow ]
+					+ SVerticalBox::Slot().AutoHeight()[ HullRow ]
+					+ SVerticalBox::Slot().AutoHeight()[ IMPRow ]
+				]
+			]
+		];
+	GEngine->GameViewport->AddViewportWidgetContent( Hud.ToSharedRef(), 0 );
 }
 
 void UFlyingCombatComponent::UpdateShield( float DeltaTime )
 {
-	if( GetOwner()->HasAuthority() && IsFlying() && ShieldCharge < ShieldMax && GetWorld()->GetTimeSeconds() - LastHitTime >= ShieldHitDelay )
+	if( GetOwner()->HasAuthority() && IsFlying() && !bShieldDown && ShieldCharge < ShieldMax && GetWorld()->GetTimeSeconds() - LastHitTime >= ShieldHitDelay )
 	{
 		SetShield( ShieldCharge + ShieldMax * DeltaTime / FMath::Max( ShieldChargeSeconds, 0.1f ) );
 		if( ShieldCharge >= ShieldMax )
@@ -492,9 +778,7 @@ void UFlyingCombatComponent::UpdateReticle()
 	{
 		return;
 	}
-	const APawn* Pawn = Cast< APawn >( GetOwner() );
-	const APlayerController* PC = Pawn ? Cast< APlayerController >( Pawn->GetController() ) : nullptr;
-	const bool bShow = IsFlying() && PC && PC->IsLocalController();
+	const bool bShow = IsLocalPilotFlying();
 	if( ReticleComponent->GetVisibleFlag() != bShow )
 	{
 		ReticleComponent->SetVisibility( bShow );

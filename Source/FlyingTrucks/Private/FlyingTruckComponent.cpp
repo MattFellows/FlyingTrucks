@@ -185,10 +185,13 @@ void UFlyingTruckComponent::CreateInputObjects()
 	FlightContext->MapKey( PitchDownAction, EKeys::C );                         // matches the game's "down" habit
 	FlightContext->MapKey( PitchDownAction, EKeys::Gamepad_FaceButton_Right );  // B
 	FireAction = NewObject< UInputAction >( this, TEXT( "IA_FlyingTruck_Fire" ) );
+	IMPAction = NewObject< UInputAction >( this, TEXT( "IA_FlyingTruck_IMP" ) );
 	if( Combat )
 	{
 		FlightContext->MapKey( FireAction, EKeys::LeftMouseButton );
 		FlightContext->MapKey( FireAction, EKeys::Gamepad_RightShoulder );      // RB / R1
+		FlightContext->MapKey( IMPAction, EKeys::RightMouseButton );
+		FlightContext->MapKey( IMPAction, EKeys::Gamepad_LeftShoulder );        // LB / L1
 	}
 }
 
@@ -227,6 +230,7 @@ void UFlyingTruckComponent::BindToController( APlayerController* PlayerControlle
 		FlightInputComponent->BindAction( PitchUpAction, ETriggerEvent::Completed, this, &UFlyingTruckComponent::Input_PitchUpReleased );
 		FlightInputComponent->BindAction( PitchDownAction, ETriggerEvent::Started, this, &UFlyingTruckComponent::Input_PitchDownPressed );
 		FlightInputComponent->BindAction( PitchDownAction, ETriggerEvent::Completed, this, &UFlyingTruckComponent::Input_PitchDownReleased );
+		FlightInputComponent->BindAction( IMPAction, ETriggerEvent::Started, this, &UFlyingTruckComponent::Input_IMP );
 		FlightInputComponent->BindAction( FireAction, ETriggerEvent::Started, this, &UFlyingTruckComponent::Input_FirePressed );
 		FlightInputComponent->BindAction( FireAction, ETriggerEvent::Completed, this, &UFlyingTruckComponent::Input_FireReleased );
 		FlightInputComponent->BindAction( FireAction, ETriggerEvent::Canceled, this, &UFlyingTruckComponent::Input_FireReleased );
@@ -302,6 +306,14 @@ void UFlyingTruckComponent::Input_FirePressed( const FInputActionValue& Value )
 	}
 }
 
+void UFlyingTruckComponent::Input_IMP( const FInputActionValue& Value )
+{
+	if( Combat && bIsFlying )
+	{
+		Combat->RequestIMP();
+	}
+}
+
 void UFlyingTruckComponent::Input_FireReleased( const FInputActionValue& Value )
 {
 	if( Combat )
@@ -351,9 +363,9 @@ void UFlyingTruckComponent::SetFlying( bool bNewFlying )
 		Server_SetFlying( true );
 		return;
 	}
-	if( bNewFlying && Combat && Combat->IsKnockedOut() )
+	if( bNewFlying && Combat && Combat->IsGrounded() )
 	{
-		NotifyDriver( LOCTEXT( "EnginesOut", "Engines are still out." ) );
+		NotifyDriver( LOCTEXT( "HullTooLow", "Hull too damaged to fly - still repairing." ) );
 		return;
 	}
 	if( bNewFlying && FuelItemClass && GetFuelCount() <= 0 )

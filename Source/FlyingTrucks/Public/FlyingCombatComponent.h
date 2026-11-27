@@ -15,8 +15,11 @@ class UStaticMeshComponent;
 
 /**
  * Add next to a UFlyingTruckComponent. The server decides every hit; other machines simulate the same bolts for show.
- *  - Shield: charges slowly in flight, keeps its charge when parked, and absorbs damage to the vehicle. A bolt that
- *    gets through an empty shield knocks the engines out for a while; bolts never destroy the vehicle.
+ *  - Shield: charges slowly in flight, keeps its charge when parked, and absorbs damage to the vehicle. Once depleted
+ *    it stays down until the pilot hovers and holds fire to re-ignite it.
+ *  - Hull: takes the damage while the shield is down. At zero the ship is grounded (never destroyed); it repairs
+ *    itself while flight mode is off.
+ *  - IMP: a pulse that takes down the shields of every craft nearby, the pilot's own included.
  *  - Guns: hold fire in flight. Bolts hurt creatures and drain other shields, but not players on foot or buildings.
  */
 UCLASS( ClassGroup = ( FlyingTrucks ), meta = ( BlueprintSpawnableComponent ) )
@@ -34,9 +37,11 @@ public:
 
 	/** Local driver pressed/released the trigger. */
 	void SetFiring( bool bNewFiring );
-	/** Server: engines are out after a hit on an empty shield. */
-	bool IsKnockedOut() const;
-	/** Server: damage to the vehicle. True if the shield swallowed it. */
+	/** Local driver pressed the IMP button. */
+	void RequestIMP();
+	/** Server: hull too damaged to take off. */
+	bool IsGrounded() const { return bGrounded; }
+	/** Server: damage to the vehicle in flight goes to the shield, then the hull. True if handled here. */
 	bool AbsorbDamage( float Damage );
 	/** Marks our own meshes, so the flight component doesn't hide them with the base vehicle's. */
 	static const FName MeshTag;
@@ -49,8 +54,34 @@ public:
 	/** Charging pauses this long after a hit. */
 	UPROPERTY( EditAnywhere, Category = "Shield" )
 	float ShieldHitDelay = 4.f;
+	/** Hover and hold fire this long to bring a depleted shield back... */
 	UPROPERTY( EditAnywhere, Category = "Shield" )
-	float KnockoutSeconds = 5.f;
+	float ReigniteSeconds = 5.f;
+	/** ...to this fraction. */
+	UPROPERTY( EditAnywhere, Category = "Shield" )
+	float ReigniteFraction = 0.5f;
+	/** Slower than this (cm/s) counts as hovering. */
+	UPROPERTY( EditAnywhere, Category = "Shield" )
+	float ReigniteMaxSpeed = 300.f;
+
+	UPROPERTY( EditAnywhere, Category = "Hull" )
+	float HullMax = 100.f;
+	/** Seconds to repair from nothing to full, with flight mode off. */
+	UPROPERTY( EditAnywhere, Category = "Hull" )
+	float HullRepairSeconds = 120.f;
+	/** A grounded ship can fly again at this fraction. */
+	UPROPERTY( EditAnywhere, Category = "Hull" )
+	float HullFlyFraction = 0.25f;
+
+	UPROPERTY( EditAnywhere, Category = "IMP" )
+	float IMPRadius = 15000.f;
+	UPROPERTY( EditAnywhere, Category = "IMP" )
+	float IMPCooldownSeconds = 20.f;
+	UPROPERTY( EditAnywhere, Category = "IMP" )
+	float IMPWaveSeconds = 0.8f;
+	UPROPERTY( EditAnywhere, Category = "IMP" )
+	FLinearColor IMPColor = FLinearColor( 0.6f, 0.25f, 1.f );
+
 	/** Single hits at least this big go through (e.g. falling out of the world). */
 	UPROPERTY( EditAnywhere, Category = "Shield" )
 	float ShieldMaxAbsorb = 1000.f;
@@ -98,6 +129,10 @@ protected:
 	void Server_SetFiring( bool bNewFiring );
 	UFUNCTION( NetMulticast, Unreliable )
 	void Multicast_Fire( FVector_NetQuantize Start, FVector_NetQuantize Velocity );
+	UFUNCTION( Server, Reliable )
+	void Server_FireIMP();
+	UFUNCTION( NetMulticast, Reliable )
+	void Multicast_IMP();
 	UFUNCTION()
 	void OnRep_ShieldLevel( uint8 OldLevel );
 
@@ -118,6 +153,15 @@ private:
 	void UpdateBolts( float DeltaTime );
 	void UpdateShield( float DeltaTime );
 	void UpdateReticle();
+	void UpdateReignite( float DeltaTime );
+	void UpdateHull( float DeltaTime );
+	void UpdateIMPWave( float DeltaTime );
+	void UpdateHud();
+	void RemoveHud();
+	bool IsLocalPilotFlying() const;
+	/** Server: shield to zero, staying there until re-ignited. */
+	void DropShield();
+	void SetHull( float NewHull );
 	/** Moves a bolt from A to B; true if it hit something. Applies damage on the server. */
 	bool TraceBolt( const FVector& A, const FVector& B, FVector& OutHit );
 	/** Where a segment enters this ship's bubble, 0..1; negative if it misses. */
@@ -144,9 +188,30 @@ private:
 	UPROPERTY( Transient, ReplicatedUsing = OnRep_ShieldLevel )
 	uint8 ShieldLevel = 0;
 
-	float ShieldCharge = 0.f; // server
+	/** 0..255 of HullMax. */
+	UPROPERTY( Transient, Replicated )
+	uint8 HullLevel = 255;
+	/** 0..255 of the way to re-ignition. */
+	UPROPERTY( Transient, Replicated )
+	uint8 ReigniteLevel = 0;
+	/** Depleted: stays at zero until re-ignited. */
+	UPROPERTY( Transient, Replicated )
+	bool bShieldDown = false;
+
+	UPROPERTY( Transient )
+	TObjectPtr< UStaticMeshComponent > WaveComponent;
+	UPROPERTY( Transient )
+	TObjectPtr< UMaterialInstanceDynamic > WaveMID;
+	float WaveAge = -1.f;
+	double LastIMPTime = -1000.0;
+
+	TSharedPtr< class SWidget > Hud;
+
+	float HullCharge = 0.f;     // server
+	float ReigniteProgress = 0.f; // server, seconds
+	bool bGrounded = false;     // server
+	float ShieldCharge = 0.f;   // server
 	double LastHitTime = -1000.0;
-	double KnockedOutUntil = -1000.0;
 	bool bFiring = false;      // server
 	bool bLocalFiring = false; // driver
 	float ShotTimer = 0.f;

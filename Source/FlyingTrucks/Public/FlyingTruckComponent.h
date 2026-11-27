@@ -411,6 +411,7 @@ protected:
 	void Input_PitchDownReleased( const FInputActionValue& Value ) { bPitchDownHeld = false; }
 
 	void Input_FirePressed( const FInputActionValue& Value );
+	void Input_IMP( const FInputActionValue& Value );
 	void Input_FireReleased( const FInputActionValue& Value );
 
 	bool IsAirborne( const UPrimitiveComponent* Body ) const;
@@ -576,6 +577,9 @@ private:
 	/** Mapped only on vehicles with a combat component. */
 	UPROPERTY( Transient )
 	TObjectPtr< UInputAction > FireAction;
+
+	UPROPERTY( Transient )
+	TObjectPtr< UInputAction > IMPAction;
 
 	UPROPERTY( Transient )
 	TObjectPtr< class UFlyingCombatComponent > Combat;

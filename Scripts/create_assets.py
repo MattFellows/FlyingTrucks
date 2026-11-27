@@ -612,7 +612,8 @@ def add_combat_component(bp):
 
 mbot_desc_text = ("A sleek black starfighter that hovers on its acclivity ring. Press F (Y on gamepad) to lift off; "
                   "while hovering Space/A rises and C, Ctrl/B sinks, and once moving it flies like the Flying Truck. "
-                  "Left mouse (RB on gamepad) fires its particle guns, and its energy shield charges up slowly in flight. "
+                  "Left mouse (RB on gamepad) fires its particle guns and right mouse (LB) its IMP, which takes down every shield nearby. "
+                  "Its own shield charges slowly in flight; once down, hover and hold fire for 5 seconds to re-ignite it. "
                   "Burns one Acclivity Stone per minute of flight from its cargo or your inventory.")
 bp_mbot = make_blueprint("BP_MBot", load_cls(VEH_DIR + "Explorer/BP_Explorer.BP_Explorer_C"), MBOT_DIR)
 add_flight_component(bp_mbot)
